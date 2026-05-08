@@ -25,6 +25,7 @@ import yaml
 DEFAULT_OUTPUT_PATH = "subscription.generated.yaml"
 DEFAULT_LISTENER_PORT = 17891
 SUBSCRIPTION_URL_ENV = "CLASH_SUBSCRIPTION_URL"
+LANG_ENV = "CLASH_SUB_LANG"
 MANAGED_EXIT_BASE_NAME = "静态住宅-落地出口"
 MANAGED_GROUP_NAME = "Claude-专用链路"
 MANAGED_LISTENER_NAME = "cac-docker-socks"
@@ -41,6 +42,7 @@ FETCH_HEADERS = {
     "User-Agent": "clash-verge/1.0",
     "Accept": "text/yaml, application/x-yaml, text/plain, */*",
 }
+CURRENT_LANG = "en"
 
 
 def build_managed_rules(group_name: str) -> list[str]:
@@ -113,6 +115,35 @@ class UserFacingError(RuntimeError):
     pass
 
 
+def normalize_language(value: str | None) -> str:
+    normalized = (value or "en").strip().casefold()
+    if normalized in {"zh", "cn", "zh-cn", "chinese"}:
+        return "zh"
+    if normalized in {"en", "us", "en-us", "english"}:
+        return "en"
+    return "en"
+
+
+def set_language(value: str | None) -> None:
+    global CURRENT_LANG
+    CURRENT_LANG = normalize_language(value)
+
+
+def detect_cli_language(argv: list[str] | None = None) -> str:
+    raw = os.environ.get(LANG_ENV, "en")
+    tokens = sys.argv[1:] if argv is None else argv
+    for index, token in enumerate(tokens):
+        if token == "--lang" and index + 1 < len(tokens):
+            raw = tokens[index + 1]
+        elif token.startswith("--lang="):
+            raw = token.split("=", 1)[1]
+    return normalize_language(raw)
+
+
+def ui(en: str, zh: str) -> str:
+    return zh if CURRENT_LANG == "zh" else en
+
+
 def log(message: str) -> None:
     print(f"[INFO] {message}", flush=True)
 
@@ -122,90 +153,153 @@ def fail(message: str) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    set_language(detect_cli_language())
     parser = argparse.ArgumentParser(
-        description="Fetch a Clash subscription and inject managed chain-routing blocks."
+        description=ui(
+            "Fetch a Clash subscription and inject managed chain-routing blocks.",
+            "获取 Clash 订阅并注入链式转发配置。",
+        )
+    )
+    parser.add_argument(
+        "--lang",
+        default=os.environ.get(LANG_ENV, "en"),
+        help=ui(
+            f"Prompt/log language: en or zh (default: {LANG_ENV} or en).",
+            f"提示和日志语言：en 或 zh（默认读取 {LANG_ENV}，否则 en）。",
+        ),
     )
     parser.add_argument(
         "--subscription-url",
-        help=(
-            "Subscription URL. When omitted, prompt for input or read from "
-            f"the {SUBSCRIPTION_URL_ENV} environment variable."
+        help=ui(
+            (
+                "Subscription URL. When omitted, prompt for input or read from "
+                f"the {SUBSCRIPTION_URL_ENV} environment variable."
+            ),
+            (
+                "上游订阅地址。未提供时交互输入，或读取 "
+                f"{SUBSCRIPTION_URL_ENV} 环境变量。"
+            ),
         ),
     )
     parser.add_argument(
         "--input-file",
-        help="Read a local YAML file instead of fetching from a subscription URL.",
+        help=ui(
+            "Read a local YAML file instead of fetching from a subscription URL.",
+            "读取本地 YAML 文件，而不是从订阅地址获取。",
+        ),
     )
     parser.add_argument(
         "-o",
         "--output",
-        help=f"Output file path. When omitted, prompt and default to {DEFAULT_OUTPUT_PATH}.",
+        help=ui(
+            f"Output file path. When omitted, prompt and default to {DEFAULT_OUTPUT_PATH}.",
+            f"输出文件路径。未提供时交互输入，默认 {DEFAULT_OUTPUT_PATH}。",
+        ),
     )
     parser.add_argument(
         "--chain-node-url",
         action="append",
         default=[],
-        help="Manual exit URL such as vmess://..., ss://..., or socks://.... Repeat for multiple exits.",
+        help=ui(
+            "Manual exit URL such as vmess://..., ss://..., or socks://.... Repeat for multiple exits.",
+            "手动出口节点 URL，例如 vmess://...、ss://... 或 socks://...。多个出口可重复传入。",
+        ),
     )
     parser.add_argument(
         "--chain-node-dialer",
         action="append",
         default=[],
-        help="Existing upstream proxy name used as dialer-proxy for each manual exit. Repeat in the same order.",
+        help=ui(
+            "Existing upstream proxy name used as dialer-proxy for each manual exit. Repeat in the same order.",
+            "每个手动出口使用的上游 dialer-proxy 节点名，按出口顺序重复传入。",
+        ),
     )
     parser.add_argument(
         "--active-exit",
-        help="Which managed exit should be used by the managed route group. Accepts a 1-based index or exact name.",
+        help=ui(
+            "Which managed exit should be used by the managed route group. Accepts a 1-based index or exact name.",
+            "托管策略组要使用哪个手动出口。支持从 1 开始的序号或完整名称。",
+        ),
     )
     parser.add_argument(
         "--listener-port",
         type=int,
-        help=f"Listener port for {MANAGED_LISTENER_NAME} (default: {DEFAULT_LISTENER_PORT}).",
+        help=ui(
+            f"Listener port for {MANAGED_LISTENER_NAME} (default: {DEFAULT_LISTENER_PORT}).",
+            f"{MANAGED_LISTENER_NAME} 监听端口（默认：{DEFAULT_LISTENER_PORT}）。",
+        ),
     )
     parser.add_argument(
         "--timeout",
         type=float,
         default=20.0,
-        help="HTTP timeout in seconds when fetching a subscription URL.",
+        help=ui(
+            "HTTP timeout in seconds when fetching a subscription URL.",
+            "获取订阅地址时的 HTTP 超时时间，单位秒。",
+        ),
     )
     parser.add_argument(
         "--serve",
         action="store_true",
-        help="Run a local HTTP server that serves the rewritten YAML as a Clash Verge subscription URL.",
+        help=ui(
+            "Run a local HTTP server that serves the rewritten YAML as a Clash Verge subscription URL.",
+            "启动本地 HTTP 服务，将改写后的 YAML 作为 Clash Verge 订阅地址提供。",
+        ),
     )
     parser.add_argument(
         "--serve-host",
         default="0.0.0.0",
-        help="Local HTTP server bind host (default: 0.0.0.0).",
+        help=ui(
+            "Local HTTP server bind host (default: 0.0.0.0).",
+            "本地 HTTP 服务监听地址（默认：0.0.0.0）。",
+        ),
     )
     parser.add_argument(
         "--allow-lan",
         action="store_true",
-        help="Deprecated compatibility flag. LAN access is already enabled by default.",
+        help=ui(
+            "Deprecated compatibility flag. LAN access is already enabled by default.",
+            "兼容旧版本的废弃参数。局域网访问已经默认启用。",
+        ),
     )
     parser.add_argument(
         "--public-host",
-        help="Advertised host/IP used in printed LAN URLs when serving to other devices, e.g. 192.168.1.23.",
+        help=ui(
+            "Advertised host/IP used in printed LAN URLs when serving to other devices, e.g. 192.168.1.23.",
+            "打印给其他设备使用的局域网主机名或 IP，例如 192.168.1.23。",
+        ),
     )
     parser.add_argument(
         "--serve-port",
         type=int,
         default=8990,
-        help="Local HTTP server bind port (default: 8990).",
+        help=ui(
+            "Local HTTP server bind port (default: 8990).",
+            "本地 HTTP 服务监听端口（默认：8990）。",
+        ),
     )
     parser.add_argument(
         "--serve-path",
         default="/subscription.yaml",
-        help="HTTP path served as the Clash Verge subscription URL (default: /subscription.yaml).",
+        help=ui(
+            "HTTP path served as the Clash Verge subscription URL (default: /subscription.yaml).",
+            "作为 Clash Verge 订阅地址提供的 HTTP 路径（默认：/subscription.yaml）。",
+        ),
     )
     parser.add_argument(
         "--verify-against",
-        help="Compare the generated YAML semantically against a reference YAML file.",
+        help=ui(
+            "Compare the generated YAML semantically against a reference YAML file.",
+            "将生成 YAML 与参考 YAML 做语义对比。",
+        ),
     )
     parser.add_argument(
         "--no-interactive",
         action="store_true",
-        help="Do not prompt. Missing values use defaults when available, otherwise exit with an error.",
+        help=ui(
+            "Do not prompt. Missing values use defaults when available, otherwise exit with an error.",
+            "不进行交互输入。缺失值有默认值则使用默认值，否则报错退出。",
+        ),
     )
     return parser.parse_args()
 
@@ -228,7 +322,10 @@ def decode_text_bytes(data: bytes) -> LoadedText:
             return LoadedText(data.decode("utf-8-sig"), "utf-8-sig")
         return LoadedText(data.decode("utf-8"), "utf-8")
     except UnicodeDecodeError as exc:
-        fail(f"Input is not valid UTF-8 or UTF-8 BOM. Aborting to avoid character corruption: {exc}")
+        fail(ui(
+            f"Input is not valid UTF-8 or UTF-8 BOM. Aborting to avoid character corruption: {exc}",
+            f"输入不是有效的 UTF-8 或 UTF-8 BOM。为避免字符损坏，已停止：{exc}",
+        ))
 
 
 def read_text_file(path: Path) -> LoadedText:
@@ -243,35 +340,53 @@ def fetch_text(url: str, timeout: float) -> LoadedText:
 
 def prompt_text(prompt: str, default: str | None = None, allow_empty: bool = False) -> str:
     while True:
-        suffix = f" [default: {default}]" if default is not None else ""
+        suffix = ui(f" [default: {default}]", f" [默认：{default}]") if default is not None else ""
         try:
             raw = input(f"{prompt}{suffix}: ").strip()
         except EOFError:
             if default is not None:
-                log(f"{prompt} not provided. Using default: {default}")
+                log(ui(
+                    f"{prompt} not provided. Using default: {default}",
+                    f"{prompt} 未提供，使用默认值：{default}",
+                ))
                 return default
             if allow_empty:
                 return ""
-            fail(f"Missing required input for: {prompt}")
+            fail(ui(
+                f"Missing required input for: {prompt}",
+                f"缺少必填输入：{prompt}",
+            ))
         if raw:
             return raw
         if default is not None:
             return default
         if allow_empty:
             return ""
-        print("Input cannot be empty. Please try again.", flush=True)
+        print(ui(
+            "Input cannot be empty. Please try again.",
+            "输入不能为空，请重试。",
+        ), flush=True)
 
 
 def prompt_manual_urls(args: argparse.Namespace) -> list[str]:
     if args.chain_node_url:
         return args.chain_node_url
     if args.no_interactive:
-        fail("Provide at least one --chain-node-url, or run in interactive mode.")
+        fail(ui(
+            "Provide at least one --chain-node-url, or run in interactive mode.",
+            "请至少提供一个 --chain-node-url，或使用交互模式运行。",
+        ))
 
     urls: list[str] = []
-    log("Enter at least one manual exit URL. Submit an empty line to finish.")
+    log(ui(
+        "Enter at least one manual exit URL. Submit an empty line to finish.",
+        "请输入至少一个手动出口节点 URL。输入空行结束。",
+    ))
     while True:
-        label = f"Manual exit URL {len(urls) + 1}"
+        label = ui(
+            f"Manual exit URL {len(urls) + 1}",
+            f"手动出口节点 URL {len(urls) + 1}",
+        )
         value = prompt_text(label, allow_empty=bool(urls))
         if not value:
             break
@@ -281,7 +396,10 @@ def prompt_manual_urls(args: argparse.Namespace) -> list[str]:
 
 def ensure_dict(value: Any, field_name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
-        fail(f"{field_name} is not a valid YAML mapping.")
+        fail(ui(
+            f"{field_name} is not a valid YAML mapping.",
+            f"{field_name} 不是有效的 YAML 映射。",
+        ))
     return value
 
 
@@ -295,13 +413,19 @@ def decode_base64_text(raw: str) -> str:
             return decoded.decode("utf-8")
         except Exception as exc:  # noqa: BLE001
             last_error = exc
-    raise ValueError(f"Could not decode base64 payload: {raw}") from last_error
+    raise ValueError(ui(
+        f"Could not decode base64 payload: {raw}",
+        f"无法解码 base64 内容：{raw}",
+    )) from last_error
 
 
 def split_uri_body(uri: str, expected_scheme: str) -> tuple[str, str]:
     prefix = f"{expected_scheme}://"
     if not uri.lower().startswith(prefix):
-        raise ValueError(f"Not a valid {expected_scheme}:// URL")
+        raise ValueError(ui(
+            f"Not a valid {expected_scheme}:// URL",
+            f"不是有效的 {expected_scheme}:// URL",
+        ))
     payload = uri[len(prefix) :]
     fragment = ""
     if "#" in payload:
@@ -314,7 +438,10 @@ def split_uri_body(uri: str, expected_scheme: str) -> tuple[str, str]:
 def parse_host_port(host_port_text: str) -> tuple[str, int]:
     parsed = urlsplit(f"//{host_port_text}")
     if not parsed.hostname or parsed.port is None:
-        raise ValueError(f"Could not parse host and port from: {host_port_text}")
+        raise ValueError(ui(
+            f"Could not parse host and port from: {host_port_text}",
+            f"无法解析主机和端口：{host_port_text}",
+        ))
     return parsed.hostname, parsed.port
 
 
@@ -352,7 +479,10 @@ def parse_ss_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
         auth_text, host_port_text = decoded.rsplit("@", 1)
 
     if ":" not in auth_text:
-        raise ValueError("ss:// URL is missing cipher:password")
+        raise ValueError(ui(
+            "ss:// URL is missing cipher:password",
+            "ss:// URL 缺少 cipher:password",
+        ))
 
     cipher, password = auth_text.split(":", 1)
     server, port = parse_host_port(host_port_text)
@@ -371,7 +501,10 @@ def parse_ss_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
 def parse_socks_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     payload, _remark = split_uri_body(uri, "socks")
     if "@" not in payload:
-        raise ValueError("socks:// URL is missing credentials or host information.")
+        raise ValueError(ui(
+            "socks:// URL is missing credentials or host information.",
+            "socks:// URL 缺少认证信息或主机信息。",
+        ))
 
     auth_text, host_port_text = payload.rsplit("@", 1)
     auth_decoded = auth_text if ":" in unquote(auth_text) else decode_base64_text(auth_text)
@@ -402,24 +535,36 @@ def parse_vmess_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     try:
         data = json.loads(decode_base64_text(payload))
     except json.JSONDecodeError as exc:
-        raise ValueError("The vmess:// base64 payload is not valid JSON.") from exc
+        raise ValueError(ui(
+            "The vmess:// base64 payload is not valid JSON.",
+            "vmess:// base64 内容不是有效 JSON。",
+        )) from exc
 
     server = data.get("add") or data.get("server")
     port_value = data.get("port")
     uuid = data.get("id") or data.get("uuid")
     if not server or port_value is None or not uuid:
-        raise ValueError("A vmess:// URL must include add, port, and id.")
+        raise ValueError(ui(
+            "A vmess:// URL must include add, port, and id.",
+            "vmess:// URL 必须包含 add、port 和 id。",
+        ))
 
     try:
         port = int(port_value)
     except ValueError as exc:
-        raise ValueError("The vmess:// port field is not numeric.") from exc
+        raise ValueError(ui(
+            "The vmess:// port field is not numeric.",
+            "vmess:// 的 port 字段不是数字。",
+        )) from exc
 
     alter_id_value = data.get("aid", data.get("alterId", 0))
     try:
         alter_id = int(alter_id_value)
     except ValueError as exc:
-        raise ValueError("The vmess:// aid/alterId field is not numeric.") from exc
+        raise ValueError(ui(
+            "The vmess:// aid/alterId field is not numeric.",
+            "vmess:// 的 aid/alterId 字段不是数字。",
+        )) from exc
 
     node: dict[str, Any] = {
         "name": DoubleQuotedString(name),
@@ -466,7 +611,10 @@ def parse_manual_proxy_url(uri: str, name: str, dialer_proxy: str) -> dict[str, 
         return parse_ss_url(uri, name, dialer_proxy)
     if lowered.startswith("socks://"):
         return parse_socks_url(uri, name, dialer_proxy)
-    raise ValueError("Only vmess://, ss://, and socks:// manual exit URLs are supported.")
+    raise ValueError(ui(
+        "Only vmess://, ss://, and socks:// manual exit URLs are supported.",
+        "仅支持 vmess://、ss:// 和 socks:// 手动出口节点 URL。",
+    ))
 
 
 def prefer_japan_proxy(proxy_names: list[str]) -> str:
@@ -475,7 +623,10 @@ def prefer_japan_proxy(proxy_names: list[str]) -> str:
         if any(keyword in normalized for keyword in JP_KEYWORDS):
             return name
     if not proxy_names:
-        fail("The upstream configuration does not contain any selectable proxies.")
+        fail(ui(
+            "The upstream configuration does not contain any selectable proxies.",
+            "上游配置中没有可选择的代理节点。",
+        ))
     return proxy_names[0]
 
 
@@ -486,24 +637,36 @@ def choose_from_list(
     no_interactive: bool,
 ) -> str:
     if default_option not in options:
-        fail(f"The default option for '{title}' does not exist: {default_option}")
+        fail(ui(
+            f"The default option for '{title}' does not exist: {default_option}",
+            f"“{title}” 的默认选项不存在：{default_option}",
+        ))
 
     print(title, flush=True)
     for index, option in enumerate(options, start=1):
-        marker = "  [default]" if option == default_option else ""
+        marker = ui("  [default]", "  [默认]") if option == default_option else ""
         print(f"  {index}. {option}{marker}", flush=True)
 
     if no_interactive:
-        log(f"{title} not provided. Using default: {default_option}")
+        log(ui(
+            f"{title} not provided. Using default: {default_option}",
+            f"{title} 未提供，使用默认值：{default_option}",
+        ))
         return default_option
 
     while True:
         try:
             choice = input(
-                f"Enter a number or full name, or press Enter to use [{default_option}]: "
+                ui(
+                    f"Enter a number or full name, or press Enter to use [{default_option}]: ",
+                    f"输入序号或完整名称，直接回车使用 [{default_option}]：",
+                )
             ).strip()
         except EOFError:
-            log(f"{title} not provided. Using default: {default_option}")
+            log(ui(
+                f"{title} not provided. Using default: {default_option}",
+                f"{title} 未提供，使用默认值：{default_option}",
+            ))
             return default_option
         if not choice:
             return default_option
@@ -513,7 +676,10 @@ def choose_from_list(
                 return options[numeric - 1]
         if choice in options:
             return choice
-        print("Invalid selection. Please try again.", flush=True)
+        print(ui(
+            "Invalid selection. Please try again.",
+            "选择无效，请重试。",
+        ), flush=True)
 
 
 def choose_named_value(
@@ -530,37 +696,49 @@ def choose_named_value(
                 return options[numeric - 1]
         if provided_value in options:
             return provided_value
-        fail(f"Invalid value for '{title}': {provided_value}")
+        fail(ui(
+            f"Invalid value for '{title}': {provided_value}",
+            f"“{title}” 的值无效：{provided_value}",
+        ))
     return choose_from_list(title, options, default_option, no_interactive)
 
 
 def choose_listener_port(args: argparse.Namespace) -> int:
     if args.listener_port is not None:
         if args.listener_port <= 0 or args.listener_port > 65535:
-            fail("The listener port must be between 1 and 65535.")
+            fail(ui(
+                "The listener port must be between 1 and 65535.",
+                "监听端口必须在 1 到 65535 之间。",
+            ))
         return args.listener_port
 
     if args.no_interactive:
-        log(f"Listener port not provided. Using default: {DEFAULT_LISTENER_PORT}")
+        log(ui(
+            f"Listener port not provided. Using default: {DEFAULT_LISTENER_PORT}",
+            f"监听端口未提供，使用默认值：{DEFAULT_LISTENER_PORT}",
+        ))
         return DEFAULT_LISTENER_PORT
 
     while True:
-        raw = prompt_text("Enter listener port", default=str(DEFAULT_LISTENER_PORT))
+        raw = prompt_text(ui("Enter listener port", "请输入监听端口"), default=str(DEFAULT_LISTENER_PORT))
         try:
             port = int(raw)
         except ValueError:
-            print("The port must be numeric.", flush=True)
+            print(ui("The port must be numeric.", "端口必须是数字。"), flush=True)
             continue
         if 1 <= port <= 65535:
             return port
-        print("The port must be between 1 and 65535.", flush=True)
+        print(ui(
+            "The port must be between 1 and 65535.",
+            "端口必须在 1 到 65535 之间。",
+        ), flush=True)
 
 
 def choose_output_path(args: argparse.Namespace) -> Path:
     if args.output:
         return Path(args.output).expanduser().resolve()
 
-    raw_path = prompt_text("Enter output file path", default=DEFAULT_OUTPUT_PATH)
+    raw_path = prompt_text(ui("Enter output file path", "请输入输出文件路径"), default=DEFAULT_OUTPUT_PATH)
     return Path(raw_path).expanduser().resolve()
 
 
@@ -650,30 +828,45 @@ def resolve_source_spec(args: argparse.Namespace) -> SourceSpec:
     if args.subscription_url:
         subscription_url = args.subscription_url
     elif default_url:
-        subscription_url = prompt_text("Enter upstream subscription URL", default=default_url)
+        subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"), default=default_url)
     else:
-        subscription_url = prompt_text("Enter upstream subscription URL")
+        subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"))
     return SourceSpec(subscription_url=subscription_url)
 
 
 def load_source_text(source_spec: SourceSpec, timeout: float, *, announce: bool) -> LoadedText:
     if source_spec.input_file:
         if announce:
-            log(f"Loading local input file: {source_spec.input_file}")
+            log(ui(
+                f"Loading local input file: {source_spec.input_file}",
+                f"正在读取本地输入文件：{source_spec.input_file}",
+            ))
         return read_text_file(source_spec.input_file)
 
     if not source_spec.subscription_url:
-        fail("Missing upstream subscription URL.")
+        fail(ui("Missing upstream subscription URL.", "缺少上游订阅地址。"))
     if announce:
-        log(f"Fetching upstream subscription URL: {source_spec.subscription_url}")
+        log(ui(
+            f"Fetching upstream subscription URL: {source_spec.subscription_url}",
+            f"正在获取上游订阅地址：{source_spec.subscription_url}",
+        ))
     try:
         return fetch_text(source_spec.subscription_url, timeout=timeout)
     except HTTPError as exc:
-        fail(f"Failed to fetch the upstream subscription: HTTP {exc.code} {exc.reason}")
+        fail(ui(
+            f"Failed to fetch the upstream subscription: HTTP {exc.code} {exc.reason}",
+            f"获取上游订阅失败：HTTP {exc.code} {exc.reason}",
+        ))
     except URLError as exc:
-        fail(f"Failed to fetch the upstream subscription: {exc.reason}")
+        fail(ui(
+            f"Failed to fetch the upstream subscription: {exc.reason}",
+            f"获取上游订阅失败：{exc.reason}",
+        ))
     except TimeoutError:
-        fail("Failed to fetch the upstream subscription: request timed out")
+        fail(ui(
+            "Failed to fetch the upstream subscription: request timed out",
+            "获取上游订阅失败：请求超时",
+        ))
     return ""
 
 
@@ -691,7 +884,10 @@ def load_yaml(raw_text: str) -> dict[str, Any]:
 def collect_proxy_names(config: dict[str, Any]) -> list[str]:
     proxies = config.get("proxies") or []
     if not isinstance(proxies, list):
-        fail("The upstream YAML field 'proxies' is not a list.")
+        fail(ui(
+            "The upstream YAML field 'proxies' is not a list.",
+            "上游 YAML 字段 'proxies' 不是列表。",
+        ))
     names: list[str] = []
     for item in proxies:
         if (
@@ -701,7 +897,10 @@ def collect_proxy_names(config: dict[str, Any]) -> list[str]:
         ):
             names.append(item["name"])
     if not names:
-        fail("The upstream YAML does not contain any selectable proxy names.")
+        fail(ui(
+            "The upstream YAML does not contain any selectable proxy names.",
+            "上游 YAML 没有可选择的代理节点名称。",
+        ))
     return names
 
 
@@ -742,7 +941,10 @@ def strip_metadata_proxies(config: dict[str, Any]) -> list[str]:
 def ensure_selected_dialers_exist(proxy_names: list[str], dialer_proxies: list[str]) -> None:
     missing = [name for name in dialer_proxies if name not in proxy_names]
     if missing:
-        fail("The upstream subscription is missing these dialer-proxy nodes: " + ", ".join(missing))
+        fail(ui(
+            "The upstream subscription is missing these dialer-proxy nodes: " + ", ".join(missing),
+            "上游订阅缺少这些 dialer-proxy 节点：" + ", ".join(missing),
+        ))
 
 
 def resolve_dialer_proxies(
@@ -752,12 +954,18 @@ def resolve_dialer_proxies(
 ) -> list[str]:
     provided = list(args.chain_node_dialer)
     if len(provided) > len(manual_urls):
-        fail("The number of --chain-node-dialer values cannot exceed the number of --chain-node-url values.")
+        fail(ui(
+            "The number of --chain-node-dialer values cannot exceed the number of --chain-node-url values.",
+            "--chain-node-dialer 的数量不能超过 --chain-node-url 的数量。",
+        ))
 
     default_proxy = prefer_japan_proxy(proxy_names)
     resolved: list[str] = []
     for index, _url in enumerate(manual_urls):
-        label = f"Select a dialer-proxy for {build_exit_name(index + 1)}"
+        label = ui(
+            f"Select a dialer-proxy for {build_exit_name(index + 1)}",
+            f"为 {build_exit_name(index + 1)} 选择 dialer-proxy",
+        )
         chosen = choose_named_value(
             title=label,
             options=proxy_names,
@@ -777,21 +985,30 @@ def build_managed_proxies(manual_urls: list[str], dialer_proxies: list[str]) -> 
         try:
             proxy = parse_manual_proxy_url(manual_url, name=name, dialer_proxy=dialer_proxy)
         except ValueError as exc:
-            fail(f"Failed to parse {name}: {exc}")
+            fail(ui(
+                f"Failed to parse {name}: {exc}",
+                f"解析 {name} 失败：{exc}",
+            ))
         managed.append(proxy)
     return managed
 
 
 def build_transform_settings(args: argparse.Namespace, proxy_names: list[str]) -> TransformSettings:
     manual_urls = prompt_manual_urls(args)
-    log(f"Received {len(manual_urls)} manual exit URL(s).")
+    log(ui(
+        f"Received {len(manual_urls)} manual exit URL(s).",
+        f"已收到 {len(manual_urls)} 个手动出口节点 URL。",
+    ))
 
     dialer_proxies = resolve_dialer_proxies(args, proxy_names, manual_urls)
     ensure_selected_dialers_exist(proxy_names, dialer_proxies)
     managed_proxies = build_managed_proxies(manual_urls, dialer_proxies)
     exit_names = [str(proxy["name"]) for proxy in managed_proxies]
     active_exit_name = choose_named_value(
-        title=f"Select which managed exit should be used by {MANAGED_GROUP_NAME}",
+        title=ui(
+            f"Select which managed exit should be used by {MANAGED_GROUP_NAME}",
+            f"选择 {MANAGED_GROUP_NAME} 要使用的手动出口",
+        ),
         options=exit_names,
         default_option=exit_names[0],
         provided_value=args.active_exit,
@@ -845,7 +1062,10 @@ def normalize_rules(config: dict[str, Any]) -> None:
     if rules is None:
         return
     if not isinstance(rules, list):
-        fail("The 'rules' field is not a list and cannot be normalized.")
+        fail(ui(
+            "The 'rules' field is not a list and cannot be normalized.",
+            "'rules' 字段不是列表，无法标准化。",
+        ))
 
     normalized: list[Any] = []
     for item in rules:
@@ -880,12 +1100,18 @@ def inject_managed_blocks(
 
     proxies = config.setdefault("proxies", [])
     if not isinstance(proxies, list):
-        fail("The 'proxies' field is not a list and cannot receive managed exits.")
+        fail(ui(
+            "The 'proxies' field is not a list and cannot receive managed exits.",
+            "'proxies' 字段不是列表，无法写入托管出口节点。",
+        ))
     proxies.extend(managed_proxies)
 
     proxy_groups = config.setdefault("proxy-groups", [])
     if not isinstance(proxy_groups, list):
-        fail("The 'proxy-groups' field is not a list and cannot receive the managed route group.")
+        fail(ui(
+            "The 'proxy-groups' field is not a list and cannot receive the managed route group.",
+            "'proxy-groups' 字段不是列表，无法写入托管策略组。",
+        ))
     proxy_groups.insert(
         0,
         {
@@ -897,7 +1123,10 @@ def inject_managed_blocks(
 
     listeners = config.setdefault("listeners", [])
     if not isinstance(listeners, list):
-        fail("The 'listeners' field is not a list and cannot receive the managed listener.")
+        fail(ui(
+            "The 'listeners' field is not a list and cannot receive the managed listener.",
+            "'listeners' 字段不是列表，无法写入托管监听器。",
+        ))
     listeners.insert(
         0,
         {
@@ -911,7 +1140,10 @@ def inject_managed_blocks(
 
     rules = config.setdefault("rules", [])
     if not isinstance(rules, list):
-        fail("The 'rules' field is not a list and cannot receive managed rules.")
+        fail(ui(
+            "The 'rules' field is not a list and cannot receive managed rules.",
+            "'rules' 字段不是列表，无法写入托管规则。",
+        ))
     insert_at = get_rule_insert_index(rules)
     config["rules"] = rules[:insert_at] + list(MANAGED_RULES) + rules[insert_at:]
 
@@ -1002,10 +1234,16 @@ def verify_output(output_config: dict[str, Any], reference_path_text: str) -> No
     differences = collect_differences(expected, actual)
     if differences:
         fail(
-            "Verification failed. The generated YAML does not match the reference.\n"
+            ui(
+                "Verification failed. The generated YAML does not match the reference.\n",
+                "验证失败。生成的 YAML 与参考文件不一致。\n",
+            )
             + "\n".join(f"- {message}" for message in differences[:10])
         )
-    log(f"Verification passed. The generated YAML matches the reference semantics: {reference_path}")
+    log(ui(
+        f"Verification passed. The generated YAML matches the reference semantics: {reference_path}",
+        f"验证通过。生成的 YAML 与参考文件语义一致：{reference_path}",
+    ))
 
 
 def tweak_top_level_block_style(yaml_text: str) -> str:
@@ -1096,9 +1334,10 @@ def render_transformed_subscription(
     managed_proxies = build_managed_proxies(settings.manual_urls, settings.dialer_proxies)
     exit_names = [str(proxy["name"]) for proxy in managed_proxies]
     if settings.active_exit_name not in exit_names:
-        fail(
-            f"The configured active exit is not present in the managed exit list: {settings.active_exit_name}"
-        )
+        fail(ui(
+            f"The configured active exit is not present in the managed exit list: {settings.active_exit_name}",
+            f"配置的当前出口不在托管出口列表中：{settings.active_exit_name}",
+        ))
 
     inject_managed_blocks(
         config=config,
@@ -1117,16 +1356,25 @@ def prepare_runtime(args: argparse.Namespace) -> tuple[SourceSpec, TransformSett
     preview_config = load_yaml(loaded_text.text)
     removed_metadata_names = strip_metadata_proxies(preview_config)
     if removed_metadata_names:
-        log("Removed metadata-only proxy entries: " + ", ".join(removed_metadata_names))
+        log(ui(
+            "Removed metadata-only proxy entries: " + ", ".join(removed_metadata_names),
+            "已移除仅包含元信息的代理条目：" + ", ".join(removed_metadata_names),
+        ))
     proxy_names = collect_proxy_names(preview_config)
-    log(f"Parsed upstream YAML. Found {len(proxy_names)} selectable proxy name(s).")
+    log(ui(
+        f"Parsed upstream YAML. Found {len(proxy_names)} selectable proxy name(s).",
+        f"已解析上游 YAML，发现 {len(proxy_names)} 个可选择的代理节点。",
+    ))
     settings = build_transform_settings(args, proxy_names)
     return source_spec, settings, loaded_text
 
 
 def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: TransformSettings) -> int:
     if args.serve_port <= 0 or args.serve_port > 65535:
-        fail("The serve port must be between 1 and 65535.")
+        fail(ui(
+            "The serve port must be between 1 and 65535.",
+            "服务端口必须在 1 到 65535 之间。",
+        ))
 
     serve_path = normalize_serve_path(args.serve_path)
     bind_host = resolve_bind_host(args)
@@ -1184,7 +1432,10 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                     managed_config_url=managed_url,
                 )
                 if removed_names:
-                    log("Removed metadata-only proxy entries for this request: " + ", ".join(removed_names))
+                    log(ui(
+                        "Removed metadata-only proxy entries for this request: " + ", ".join(removed_names),
+                        "本次请求已移除仅包含元信息的代理条目：" + ", ".join(removed_names),
+                    ))
                 body = rendered.encode(loaded_text.encoding)
                 cache["latest"] = CachedResponse(body=body, encoding=loaded_text.encoding)
                 if output_path:
@@ -1210,7 +1461,10 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                     self.end_headers()
                     if send_body:
                         self.wfile.write(cached.body)
-                    log(f"Upstream fetch failed. Served cached content instead: {exc}")
+                    log(ui(
+                        f"Upstream fetch failed. Served cached content instead: {exc}",
+                        f"上游获取失败，已改为返回缓存内容：{exc}",
+                    ))
                     return
 
                 body = f"{exc}\n".encode("utf-8")
@@ -1220,25 +1474,49 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                 self.end_headers()
                 if send_body:
                     self.wfile.write(body)
-                log(f"Upstream fetch failed and no cache was available: {exc}")
+                log(ui(
+                    f"Upstream fetch failed and no cache was available: {exc}",
+                    f"上游获取失败，且没有可用缓存：{exc}",
+                ))
                 return
 
     httpd = ThreadingHTTPServer((bind_host, args.serve_port), SubscriptionHandler)
-    log(f"Local subscription server started on {bind_host}:{args.serve_port}")
+    log(ui(
+        f"Local subscription server started on {bind_host}:{args.serve_port}",
+        f"本地订阅服务已启动：{bind_host}:{args.serve_port}",
+    ))
     for url in access_urls:
-        log(f"Available subscription URL: {url}")
-    log("Use any of the URLs above as the subscription URL in Clash Verge.")
+        log(ui(f"Available subscription URL: {url}", f"可用订阅地址：{url}"))
+    log(ui(
+        "Use any of the URLs above as the subscription URL in Clash Verge.",
+        "请将上面的任一地址作为 Clash Verge 的订阅地址。",
+    ))
     if output_path:
-        log(f"Each successful refresh will also write to: {output_path}")
-    log("Health check URL: http://127.0.0.1:" + f"{args.serve_port}/healthz")
+        log(ui(
+            f"Each successful refresh will also write to: {output_path}",
+            f"每次成功刷新也会写入文件：{output_path}",
+        ))
+    log(ui(
+        "Health check URL: http://127.0.0.1:" + f"{args.serve_port}/healthz",
+        "健康检查地址：http://127.0.0.1:" + f"{args.serve_port}/healthz",
+    ))
     if args.allow_lan or bind_host in {"0.0.0.0", "::"}:
         if not args.public_host and len(access_urls) == 1:
-            log("LAN access is enabled by default. If no LAN IP was auto-detected, add --public-host 192.168.x.x to print a shareable LAN URL.")
-        log("If other LAN devices cannot reach this server, allow inbound Python connections through the local firewall.")
+            log(ui(
+                "LAN access is enabled by default. If no LAN IP was auto-detected, add --public-host 192.168.x.x to print a shareable LAN URL.",
+                "局域网访问默认启用。如果没有自动检测到局域网 IP，请添加 --public-host 192.168.x.x 来打印可共享的局域网地址。",
+            ))
+        log(ui(
+            "If other LAN devices cannot reach this server, allow inbound Python connections through the local firewall.",
+            "如果其他局域网设备无法访问，请在本机防火墙中允许 Python 入站连接。",
+        ))
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        log("Interrupt received. Shutting down the local subscription server.")
+        log(ui(
+            "Interrupt received. Shutting down the local subscription server.",
+            "收到中断信号，正在关闭本地订阅服务。",
+        ))
     finally:
         httpd.server_close()
     return 0
@@ -1255,15 +1533,21 @@ def run_cli(args: argparse.Namespace) -> int:
         settings,
     )
     if removed_metadata_names:
-        log("Removed metadata-only proxy entries for this write: " + ", ".join(removed_metadata_names))
+        log(ui(
+            "Removed metadata-only proxy entries for this write: " + ", ".join(removed_metadata_names),
+            "本次写入已移除仅包含元信息的代理条目：" + ", ".join(removed_metadata_names),
+        ))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding=loaded_text.encoding)
 
-    log(f"Wrote output file: {output_path}")
-    log(f"Output encoding: {loaded_text.encoding}")
+    log(ui(f"Wrote output file: {output_path}", f"已写入输出文件：{output_path}"))
+    log(ui(f"Output encoding: {loaded_text.encoding}", f"输出编码：{loaded_text.encoding}"))
     log(f"{MANAGED_GROUP_NAME} -> {settings.active_exit_name}")
-    log(f"{MANAGED_LISTENER_NAME} port -> {settings.listener_port}")
+    log(ui(
+        f"{MANAGED_LISTENER_NAME} port -> {settings.listener_port}",
+        f"{MANAGED_LISTENER_NAME} 端口 -> {settings.listener_port}",
+    ))
     for index, dialer_proxy in enumerate(settings.dialer_proxies, start=1):
         log(f"{build_exit_name(index)} -> dialer-proxy: {dialer_proxy}")
     if args.verify_against:
@@ -1273,8 +1557,12 @@ def run_cli(args: argparse.Namespace) -> int:
 
 def main() -> int:
     args = parse_args()
+    set_language(args.lang)
     if args.input_file and args.subscription_url:
-        fail("--input-file and --subscription-url cannot be used together.")
+        fail(ui(
+            "--input-file and --subscription-url cannot be used together.",
+            "--input-file 和 --subscription-url 不能同时使用。",
+        ))
     try:
         return run_cli(args)
     except UserFacingError as exc:
