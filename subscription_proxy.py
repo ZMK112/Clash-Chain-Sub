@@ -25,9 +25,9 @@ import yaml
 DEFAULT_OUTPUT_PATH = "subscription.generated.yaml"
 DEFAULT_LISTENER_PORT = 17891
 SUBSCRIPTION_URL_ENV = "CLASH_SUBSCRIPTION_URL"
-MANAGED_EXIT_BASE_NAME = "Managed Exit"
-MANAGED_GROUP_NAME = "Anthropic Route"
-MANAGED_LISTENER_NAME = "managed-socks"
+MANAGED_EXIT_BASE_NAME = "静态住宅-落地出口"
+MANAGED_GROUP_NAME = "Claude-专用链路"
+MANAGED_LISTENER_NAME = "cac-docker-socks"
 METADATA_PROXY_KEYWORDS = (
     "plan expires",
     "plan resets",
