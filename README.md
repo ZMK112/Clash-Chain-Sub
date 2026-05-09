@@ -74,6 +74,28 @@ http://192.168.1.23:8990/subscription.yaml
 
 LAN access is enabled by default because the server binds to `0.0.0.0`. If other devices cannot connect, allow inbound Python connections in the local firewall.
 
+## One-Line Remote Run
+
+You can run the interactive tool without cloning this repository:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ZMK112/Clash-Chain-Sub/main/install-run.sh)
+```
+
+The launcher downloads the latest script into `.clash-chain-sub/` under the current directory and runs it with `uv`. If `uv` is missing, the launcher installs it with the official installer.
+
+Arguments after the launcher are passed to `subscription_proxy.py`:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ZMK112/Clash-Chain-Sub/main/install-run.sh) -- --serve --lang zh --use-saved
+```
+
+If your shell does not support process substitution, use:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZMK112/Clash-Chain-Sub/main/install-run.sh | bash
+```
+
 ## One-Time YAML Generation
 
 Generate a rewritten YAML file once:
@@ -237,6 +259,26 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 9. 把脚本打印出来的订阅 URL 填入 Clash Verge。
 
 ## 中文常用命令
+
+远程一键启动交互式服务，不需要手动 clone 项目：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ZMK112/Clash-Chain-Sub/main/install-run.sh)
+```
+
+这个启动脚本会把最新版 `subscription_proxy.py` 下载到当前目录下的 `.clash-chain-sub/`，然后用 `uv` 运行。默认参数是 `--serve --lang zh`，也就是启动中文交互式订阅服务。
+
+如果需要传入脚本参数，在启动命令后使用 `--`：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ZMK112/Clash-Chain-Sub/main/install-run.sh) -- --serve --lang zh --use-saved
+```
+
+如果当前 shell 不支持 `<(...)`，可以使用：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZMK112/Clash-Chain-Sub/main/install-run.sh | bash
+```
 
 启动默认支持局域网访问的订阅服务：
 

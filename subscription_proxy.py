@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# /// script
+# dependencies = ["PyYAML"]
+# ///
 
 from __future__ import annotations
 
