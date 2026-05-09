@@ -8,11 +8,13 @@ It is useful when you want Clash Verge to keep using a normal subscription URL, 
 
 - Fetches an upstream subscription URL or reads a local YAML file.
 - Adds one or more manual exit nodes parsed from `vmess://`, `ss://`, or `socks://` URLs.
+- Optionally adds normal proxy nodes that do not use chain routing.
 - Adds the managed route group `Claude-专用链路`.
 - Adds the local SOCKS listener `cac-docker-socks`.
 - Adds three Claude-related rules for `claude.ai`, `anthropic.com`, and the `claude` keyword.
 - Removes metadata-only proxy entries such as plan expiry/reset markers.
 - Preserves UTF-8/UTF-8 BOM and non-ASCII YAML content, including Chinese names, emoji, and flags.
+- Saves successful choices locally so later runs can only refresh the upstream subscription.
 - Can write a generated YAML file once, or run a local/LAN HTTP subscription server.
 
 No real upstream subscription URL or proxy credentials are stored in this repository.
@@ -53,7 +55,8 @@ The language switch only affects prompts, logs, and help text. It does not trans
 4. Select an existing upstream node as `dialer-proxy`; Japan nodes are preferred by default when available.
 5. Select which manual exit is used by `Claude-专用链路`.
 6. Confirm the listener port, default `17891`.
-7. Use the printed HTTP URL as the subscription URL in Clash Verge.
+7. Optionally add normal proxy nodes; press Enter or answer no to skip.
+8. Use the printed HTTP URL as the subscription URL in Clash Verge.
 
 ## Interactive Server
 
@@ -92,10 +95,21 @@ python3 subscription_proxy.py \
   --public-host 192.168.1.23 \
   --subscription-url 'https://example.com/your/upstream/subscription' \
   --chain-node-url 'ss://...' \
+  --normal-node-url 'socks://...' \
   --chain-node-dialer 'Japan 01' \
   --active-exit 1 \
   --listener-port 17891 \
   --no-interactive
+```
+
+Reuse the last successful saved choices and only refresh upstream content:
+
+```bash
+python3 subscription_proxy.py \
+  --serve \
+  --lang zh \
+  --use-saved \
+  --subscription-url 'https://example.com/your/upstream/subscription'
 ```
 
 Write each successful server refresh to a file:
@@ -121,6 +135,18 @@ Set the default runtime language:
 ```bash
 export CLASH_SUB_LANG=zh
 ```
+
+## Saved Choices
+
+After a successful one-time generation or successful server refresh, the script writes local choices to `.clash-chain-state.json` by default.
+
+The saved file may contain the upstream subscription URL and private node URLs, so it is ignored by Git. On the next run, the script asks whether to reuse the saved choices. If reused, the upstream subscription is fetched again, but manual exits, normal nodes, selected `dialer-proxy`, active exit, and listener port remain unchanged.
+
+Useful options:
+
+- `--use-saved`: reuse saved choices without asking.
+- `--no-save`: do not write the state file.
+- `--state-file PATH`: use a different state file path.
 
 ## Health Check
 
@@ -150,11 +176,13 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 
 - 从上游订阅地址获取 YAML，或读取本地 YAML 文件。
 - 从 `vmess://`、`ss://`、`socks://` URL 解析手动出口节点。
+- 可选增加普通节点；普通节点不参与链式转发。
 - 自动加入 `Claude-专用链路` 策略组。
 - 自动加入 `cac-docker-socks` 本地 SOCKS 监听器。
 - 自动维护 3 条 Claude 规则：`claude.ai`、`anthropic.com`、`claude` 关键字。
 - 自动删除套餐到期、套餐重置、订阅获取时间等无用元信息节点。
 - 完整保留 UTF-8/UTF-8 BOM、中文、图标、国旗和其他非 ASCII 内容。
+- 成功生成后可把用户选择固化到本地，下次只刷新上游订阅内容。
 - 支持一次性生成 YAML，也支持启动本地/局域网 HTTP 订阅服务。
 
 仓库中不会内置真实订阅地址或节点凭据。
@@ -182,6 +210,20 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 - 通过本地 HTTP 服务提供一个稳定的新订阅地址，让 Clash Verge 刷新订阅时自动拿到修订后的配置。
 - 将链式转发只限定到指定规则或本地监听器，减少对原订阅其他规则和节点的影响。
 
+## 普通节点和固化选择
+
+普通节点是额外加入到 `proxies` 的非链式节点。脚本会把它们命名为 `普通节点`、`普通节点2` 等，并创建 `手动普通节点` 策略组。普通节点不会带 `dialer-proxy`，不会影响 `Claude-专用链路` 的链式出口；如果不需要，交互时选择跳过即可。
+
+脚本成功生成 YAML 或服务端成功刷新一次后，会默认把这次选择写入 `.clash-chain-state.json`。这个文件可能包含上游订阅地址和手动节点 URL，所以已被 `.gitignore` 忽略，不应提交到仓库。
+
+下次运行时，如果检测到已固化选择，脚本会询问是否复用。复用后只重新获取上游订阅，手动出口、普通节点、`dialer-proxy` 选择、当前出口和监听端口都保持不变，从而减少重复输入。
+
+常用参数：
+
+- `--use-saved`：直接使用已固化选择，不再询问。
+- `--no-save`：本次运行不写入固化文件。
+- `--state-file PATH`：指定其他固化文件路径。
+
 ## 中文操作步骤
 
 1. 安装依赖：`python3 -m pip install -r requirements.txt`。
@@ -191,7 +233,8 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 5. 从列表中选择每个出口使用的上游 `dialer-proxy` 节点，默认优先日本节点。
 6. 选择 `Claude-专用链路` 实际使用哪个手动出口。
 7. 确认监听端口，默认 `17891`。
-8. 把脚本打印出来的订阅 URL 填入 Clash Verge。
+8. 按需增加普通节点；不需要时直接跳过。
+9. 把脚本打印出来的订阅 URL 填入 Clash Verge。
 
 ## 中文常用命令
 
@@ -211,6 +254,12 @@ python3 subscription_proxy.py --lang zh -o ./subscription.generated.yaml
 
 ```bash
 python3 subscription_proxy.py --serve --serve-host 127.0.0.1 --lang zh
+```
+
+复用上次已固化选择，只刷新订阅：
+
+```bash
+python3 subscription_proxy.py --serve --lang zh --use-saved
 ```
 
 ## Files

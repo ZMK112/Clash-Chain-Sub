@@ -23,12 +23,15 @@ import yaml
 
 
 DEFAULT_OUTPUT_PATH = "subscription.generated.yaml"
+DEFAULT_STATE_PATH = ".clash-chain-state.json"
 DEFAULT_LISTENER_PORT = 17891
 SUBSCRIPTION_URL_ENV = "CLASH_SUBSCRIPTION_URL"
 LANG_ENV = "CLASH_SUB_LANG"
 MANAGED_EXIT_BASE_NAME = "静态住宅-落地出口"
 MANAGED_GROUP_NAME = "Claude-专用链路"
 MANAGED_LISTENER_NAME = "cac-docker-socks"
+NORMAL_NODE_BASE_NAME = "普通节点"
+NORMAL_GROUP_NAME = "手动普通节点"
 METADATA_PROXY_KEYWORDS = (
     "plan expires",
     "plan resets",
@@ -103,6 +106,7 @@ class TransformSettings:
     dialer_proxies: list[str]
     active_exit_name: str
     listener_port: int
+    normal_urls: list[str]
 
 
 @dataclass
@@ -206,6 +210,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--normal-node-url",
+        action="append",
+        default=[],
+        help=ui(
+            "Optional normal proxy URL such as vmess://..., ss://..., or socks://.... Repeat for multiple normal nodes.",
+            "可选普通节点 URL，例如 vmess://...、ss://... 或 socks://...。多个普通节点可重复传入。",
+        ),
+    )
+    parser.add_argument(
         "--chain-node-dialer",
         action="append",
         default=[],
@@ -294,6 +307,30 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--state-file",
+        default=DEFAULT_STATE_PATH,
+        help=ui(
+            f"Local state file used to persist successful choices (default: {DEFAULT_STATE_PATH}).",
+            f"用于固化成功选择的本地状态文件（默认：{DEFAULT_STATE_PATH}）。",
+        ),
+    )
+    parser.add_argument(
+        "--use-saved",
+        action="store_true",
+        help=ui(
+            "Use saved choices without prompting when the state file exists.",
+            "状态文件存在时直接使用已固化选择，不再交互确认。",
+        ),
+    )
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help=ui(
+            "Do not write successful choices to the state file.",
+            "不要把成功选择写入状态文件。",
+        ),
+    )
+    parser.add_argument(
         "--no-interactive",
         action="store_true",
         help=ui(
@@ -368,6 +405,28 @@ def prompt_text(prompt: str, default: str | None = None, allow_empty: bool = Fal
         ), flush=True)
 
 
+def prompt_yes_no(prompt: str, default: bool = False, *, no_interactive: bool = False) -> bool:
+    if no_interactive:
+        return default
+
+    default_label = "Y/n" if default else "y/N"
+    while True:
+        try:
+            raw = input(f"{prompt} [{default_label}]: ").strip().casefold()
+        except EOFError:
+            return default
+        if not raw:
+            return default
+        if raw in {"y", "yes", "1", "true", "是", "好"}:
+            return True
+        if raw in {"n", "no", "0", "false", "否", "不"}:
+            return False
+        print(ui(
+            "Enter yes or no.",
+            "请输入 yes 或 no。",
+        ), flush=True)
+
+
 def prompt_manual_urls(args: argparse.Namespace) -> list[str]:
     if args.chain_node_url:
         return args.chain_node_url
@@ -388,6 +447,38 @@ def prompt_manual_urls(args: argparse.Namespace) -> list[str]:
             f"手动出口节点 URL {len(urls) + 1}",
         )
         value = prompt_text(label, allow_empty=bool(urls))
+        if not value:
+            break
+        urls.append(value)
+    return urls
+
+
+def prompt_normal_urls(args: argparse.Namespace) -> list[str]:
+    if args.normal_node_url:
+        return args.normal_node_url
+    if args.no_interactive:
+        return []
+    if not prompt_yes_no(
+        ui(
+            "Add optional normal proxy nodes?",
+            "是否增加可选普通节点？",
+        ),
+        default=False,
+        no_interactive=args.no_interactive,
+    ):
+        return []
+
+    urls: list[str] = []
+    log(ui(
+        "Enter normal proxy URLs. Submit an empty line to finish.",
+        "请输入普通节点 URL。输入空行结束。",
+    ))
+    while True:
+        label = ui(
+            f"Normal proxy URL {len(urls) + 1}",
+            f"普通节点 URL {len(urls) + 1}",
+        )
+        value = prompt_text(label, allow_empty=True)
         if not value:
             break
         urls.append(value)
@@ -449,6 +540,10 @@ def build_exit_name(index: int) -> str:
     return MANAGED_EXIT_BASE_NAME if index == 1 else f"{MANAGED_EXIT_BASE_NAME}{index}"
 
 
+def build_normal_name(index: int) -> str:
+    return NORMAL_NODE_BASE_NAME if index == 1 else f"{NORMAL_NODE_BASE_NAME}{index}"
+
+
 def is_managed_exit_name(name: str | None) -> bool:
     if not name:
         return False
@@ -460,6 +555,17 @@ def is_managed_exit_name(name: str | None) -> bool:
     if suffix.isdigit():
         return True
     return False
+
+
+def is_normal_node_name(name: str | None) -> bool:
+    if not name:
+        return False
+    if name == NORMAL_NODE_BASE_NAME:
+        return True
+    if not name.startswith(NORMAL_NODE_BASE_NAME):
+        return False
+    suffix = name[len(NORMAL_NODE_BASE_NAME) :]
+    return suffix.isdigit()
 
 
 def is_metadata_proxy_name(name: str | None) -> bool:
@@ -498,6 +604,12 @@ def parse_ss_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     }
 
 
+def parse_ss_url_normal(uri: str, name: str) -> dict[str, Any]:
+    proxy = parse_ss_url(uri, name=name, dialer_proxy="")
+    proxy.pop("dialer-proxy", None)
+    return proxy
+
+
 def parse_socks_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     payload, _remark = split_uri_body(uri, "socks")
     if "@" not in payload:
@@ -528,6 +640,12 @@ def parse_socks_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     if password:
         node["password"] = password
     return node
+
+
+def parse_socks_url_normal(uri: str, name: str) -> dict[str, Any]:
+    proxy = parse_socks_url(uri, name=name, dialer_proxy="")
+    proxy.pop("dialer-proxy", None)
+    return proxy
 
 
 def parse_vmess_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
@@ -603,6 +721,12 @@ def parse_vmess_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     return node
 
 
+def parse_vmess_url_normal(uri: str, name: str) -> dict[str, Any]:
+    proxy = parse_vmess_url(uri, name=name, dialer_proxy="")
+    proxy.pop("dialer-proxy", None)
+    return proxy
+
+
 def parse_manual_proxy_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     lowered = uri.lower()
     if lowered.startswith("vmess://"):
@@ -614,6 +738,20 @@ def parse_manual_proxy_url(uri: str, name: str, dialer_proxy: str) -> dict[str, 
     raise ValueError(ui(
         "Only vmess://, ss://, and socks:// manual exit URLs are supported.",
         "仅支持 vmess://、ss:// 和 socks:// 手动出口节点 URL。",
+    ))
+
+
+def parse_normal_proxy_url(uri: str, name: str) -> dict[str, Any]:
+    lowered = uri.lower()
+    if lowered.startswith("vmess://"):
+        return parse_vmess_url_normal(uri, name)
+    if lowered.startswith("ss://"):
+        return parse_ss_url_normal(uri, name)
+    if lowered.startswith("socks://"):
+        return parse_socks_url_normal(uri, name)
+    raise ValueError(ui(
+        "Only vmess://, ss://, and socks:// normal proxy URLs are supported.",
+        "仅支持 vmess://、ss:// 和 socks:// 普通节点 URL。",
     ))
 
 
@@ -742,6 +880,149 @@ def choose_output_path(args: argparse.Namespace) -> Path:
     return Path(raw_path).expanduser().resolve()
 
 
+def resolve_state_path(args: argparse.Namespace) -> Path:
+    return Path(args.state_file).expanduser().resolve()
+
+
+def load_saved_settings(path: Path) -> TransformSettings | None:
+    data = load_state_data(path)
+    if not data:
+        return None
+
+    settings_data = data.get("settings")
+    if not isinstance(settings_data, dict):
+        return None
+
+    try:
+        manual_urls = list(settings_data.get("manual_urls") or [])
+        dialer_proxies = list(settings_data.get("dialer_proxies") or [])
+        active_exit_name = str(settings_data.get("active_exit_name") or "")
+        listener_port = int(settings_data.get("listener_port"))
+        normal_urls = list(settings_data.get("normal_urls") or [])
+    except (TypeError, ValueError):
+        log(ui(
+            f"Ignoring invalid state file: {path}",
+            f"忽略无效的状态文件：{path}",
+        ))
+        return None
+
+    if not manual_urls or not dialer_proxies or not active_exit_name:
+        return None
+    if not all(isinstance(value, str) for value in manual_urls + dialer_proxies + normal_urls):
+        return None
+
+    return TransformSettings(
+        manual_urls=manual_urls,
+        dialer_proxies=dialer_proxies,
+        active_exit_name=active_exit_name,
+        listener_port=listener_port,
+        normal_urls=normal_urls,
+    )
+
+
+def load_state_data(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log(ui(
+            f"Could not read saved choices from {path}: {exc}",
+            f"无法读取已固化选择 {path}：{exc}",
+        ))
+        return None
+
+    if not isinstance(data, dict) or data.get("version") != 1:
+        log(ui(
+            f"Ignoring unsupported state file: {path}",
+            f"忽略不支持的状态文件：{path}",
+        ))
+        return None
+    return data
+
+
+def load_saved_subscription_url(path: Path) -> str | None:
+    data = load_state_data(path)
+    if not data:
+        return None
+    source = data.get("source")
+    if not isinstance(source, dict):
+        return None
+    subscription_url = source.get("subscription_url")
+    if isinstance(subscription_url, str) and subscription_url.strip():
+        return subscription_url.strip()
+    return None
+
+
+def save_settings(path: Path, settings: TransformSettings, source_spec: SourceSpec | None = None) -> None:
+    payload = {
+        "version": 1,
+        "settings": {
+            "manual_urls": settings.manual_urls,
+            "dialer_proxies": settings.dialer_proxies,
+            "active_exit_name": settings.active_exit_name,
+            "listener_port": settings.listener_port,
+            "normal_urls": settings.normal_urls,
+        },
+    }
+    if source_spec and source_spec.subscription_url:
+        payload["source"] = {
+            "subscription_url": source_spec.subscription_url,
+        }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def describe_saved_settings(settings: TransformSettings) -> None:
+    log(ui(
+        "Saved choices are available:",
+        "检测到已固化选择：",
+    ))
+    log(ui(
+        f"Manual exit count: {len(settings.manual_urls)}",
+        f"手动出口数量：{len(settings.manual_urls)}",
+    ))
+    log(ui(
+        f"Active exit: {settings.active_exit_name}",
+        f"当前出口：{settings.active_exit_name}",
+    ))
+    log(ui(
+        f"Listener port: {settings.listener_port}",
+        f"监听端口：{settings.listener_port}",
+    ))
+    log(ui(
+        f"Normal proxy count: {len(settings.normal_urls)}",
+        f"普通节点数量：{len(settings.normal_urls)}",
+    ))
+
+
+def should_use_saved_settings(args: argparse.Namespace, settings: TransformSettings) -> bool:
+    describe_saved_settings(settings)
+    if args.use_saved or args.no_interactive:
+        return True
+    return prompt_yes_no(
+        ui(
+            "Use saved choices and only refresh the upstream subscription content?",
+            "是否使用已固化选择，仅刷新上游订阅内容？",
+        ),
+        default=True,
+        no_interactive=args.no_interactive,
+    )
+
+
+def has_explicit_transform_args(args: argparse.Namespace) -> bool:
+    return bool(
+        args.chain_node_url
+        or args.normal_node_url
+        or args.chain_node_dialer
+        or args.active_exit
+        or args.listener_port is not None
+    )
+
+
 def normalize_serve_path(path: str) -> str:
     normalized = path.strip() or "/subscription.yaml"
     if not normalized.startswith("/"):
@@ -824,9 +1105,12 @@ def resolve_source_spec(args: argparse.Namespace) -> SourceSpec:
         return SourceSpec(input_file=Path(args.input_file).expanduser().resolve())
 
     env_url = os.environ.get(SUBSCRIPTION_URL_ENV, "").strip()
-    default_url = args.subscription_url or env_url or None
+    saved_url = load_saved_subscription_url(resolve_state_path(args))
+    default_url = args.subscription_url or env_url or saved_url or None
     if args.subscription_url:
         subscription_url = args.subscription_url
+    elif default_url and (args.use_saved or args.no_interactive):
+        subscription_url = default_url
     elif default_url:
         subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"), default=default_url)
     else:
@@ -993,6 +1277,21 @@ def build_managed_proxies(manual_urls: list[str], dialer_proxies: list[str]) -> 
     return managed
 
 
+def build_normal_proxies(normal_urls: list[str]) -> list[dict[str, Any]]:
+    normal_proxies: list[dict[str, Any]] = []
+    for index, normal_url in enumerate(normal_urls, start=1):
+        name = build_normal_name(index)
+        try:
+            proxy = parse_normal_proxy_url(normal_url, name=name)
+        except ValueError as exc:
+            fail(ui(
+                f"Failed to parse {name}: {exc}",
+                f"解析 {name} 失败：{exc}",
+            ))
+        normal_proxies.append(proxy)
+    return normal_proxies
+
+
 def build_transform_settings(args: argparse.Namespace, proxy_names: list[str]) -> TransformSettings:
     manual_urls = prompt_manual_urls(args)
     log(ui(
@@ -1015,11 +1314,24 @@ def build_transform_settings(args: argparse.Namespace, proxy_names: list[str]) -
         no_interactive=args.no_interactive,
     )
     listener_port = choose_listener_port(args)
+    normal_urls = prompt_normal_urls(args)
+    if normal_urls:
+        log(ui(
+            f"Received {len(normal_urls)} normal proxy URL(s).",
+            f"已收到 {len(normal_urls)} 个普通节点 URL。",
+        ))
+        build_normal_proxies(normal_urls)
+    else:
+        log(ui(
+            "No normal proxy nodes will be added.",
+            "不会增加普通节点。",
+        ))
     return TransformSettings(
         manual_urls=manual_urls,
         dialer_proxies=dialer_proxies,
         active_exit_name=active_exit_name,
         listener_port=listener_port,
+        normal_urls=normal_urls,
     )
 
 
@@ -1029,7 +1341,13 @@ def strip_managed_blocks(config: dict[str, Any]) -> None:
         config["proxies"] = [
             item
             for item in proxies
-            if not (isinstance(item, dict) and is_managed_exit_name(item.get("name")))
+            if not (
+                isinstance(item, dict)
+                and (
+                    is_managed_exit_name(item.get("name"))
+                    or is_normal_node_name(item.get("name"))
+                )
+            )
         ]
 
     proxy_groups = config.get("proxy-groups") or []
@@ -1037,7 +1355,10 @@ def strip_managed_blocks(config: dict[str, Any]) -> None:
         config["proxy-groups"] = [
             item
             for item in proxy_groups
-            if not (isinstance(item, dict) and item.get("name") == MANAGED_GROUP_NAME)
+            if not (
+                isinstance(item, dict)
+                and item.get("name") in {MANAGED_GROUP_NAME, NORMAL_GROUP_NAME}
+            )
         ]
 
     listeners = config.get("listeners") or []
@@ -1094,6 +1415,7 @@ def inject_managed_blocks(
     managed_proxies: list[dict[str, Any]],
     active_exit_name: str,
     listener_port: int,
+    normal_proxies: list[dict[str, Any]],
 ) -> None:
     normalize_rules(config)
     strip_managed_blocks(config)
@@ -1105,6 +1427,7 @@ def inject_managed_blocks(
             "'proxies' 字段不是列表，无法写入托管出口节点。",
         ))
     proxies.extend(managed_proxies)
+    proxies.extend(normal_proxies)
 
     proxy_groups = config.setdefault("proxy-groups", [])
     if not isinstance(proxy_groups, list):
@@ -1120,6 +1443,18 @@ def inject_managed_blocks(
             "proxies": [DoubleQuotedString(active_exit_name)],
         },
     )
+    if normal_proxies:
+        proxy_groups.insert(
+            1,
+            {
+                "name": DoubleQuotedString(NORMAL_GROUP_NAME),
+                "type": "select",
+                "proxies": [
+                    DoubleQuotedString(str(proxy["name"]))
+                    for proxy in normal_proxies
+                ],
+            },
+        )
 
     listeners = config.setdefault("listeners", [])
     if not isinstance(listeners, list):
@@ -1332,6 +1667,7 @@ def render_transformed_subscription(
     ensure_selected_dialers_exist(proxy_names, settings.dialer_proxies)
 
     managed_proxies = build_managed_proxies(settings.manual_urls, settings.dialer_proxies)
+    normal_proxies = build_normal_proxies(settings.normal_urls)
     exit_names = [str(proxy["name"]) for proxy in managed_proxies]
     if settings.active_exit_name not in exit_names:
         fail(ui(
@@ -1344,6 +1680,7 @@ def render_transformed_subscription(
         managed_proxies=managed_proxies,
         active_exit_name=settings.active_exit_name,
         listener_port=settings.listener_port,
+        normal_proxies=normal_proxies,
     )
     config = reorder_top_level_keys(config)
     rendered = dump_yaml(config, leading_comments)
@@ -1365,6 +1702,24 @@ def prepare_runtime(args: argparse.Namespace) -> tuple[SourceSpec, TransformSett
         f"Parsed upstream YAML. Found {len(proxy_names)} selectable proxy name(s).",
         f"已解析上游 YAML，发现 {len(proxy_names)} 个可选择的代理节点。",
     ))
+    state_path = resolve_state_path(args)
+    saved_settings = load_saved_settings(state_path)
+    can_prompt_for_saved = not has_explicit_transform_args(args)
+    if saved_settings and (args.use_saved or can_prompt_for_saved) and should_use_saved_settings(args, saved_settings):
+        ensure_selected_dialers_exist(proxy_names, saved_settings.dialer_proxies)
+        build_managed_proxies(saved_settings.manual_urls, saved_settings.dialer_proxies)
+        build_normal_proxies(saved_settings.normal_urls)
+        log(ui(
+            f"Using saved choices from: {state_path}",
+            f"使用已固化选择：{state_path}",
+        ))
+        return source_spec, saved_settings, loaded_text
+    if saved_settings and has_explicit_transform_args(args) and not args.use_saved:
+        log(ui(
+            "Explicit transform options were provided, so saved choices will not be reused.",
+            "本次已显式提供转换参数，因此不会复用已固化选择。",
+        ))
+
     settings = build_transform_settings(args, proxy_names)
     return source_spec, settings, loaded_text
 
@@ -1441,6 +1796,13 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                 if output_path:
                     output_path.parent.mkdir(parents=True, exist_ok=True)
                     output_path.write_bytes(body)
+                if not args.no_save:
+                    state_path = resolve_state_path(args)
+                    save_settings(state_path, settings, source_spec)
+                    log(ui(
+                        f"Saved choices to: {state_path}",
+                        f"已固化选择到：{state_path}",
+                    ))
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/yaml; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -1540,6 +1902,13 @@ def run_cli(args: argparse.Namespace) -> int:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding=loaded_text.encoding)
+    if not args.no_save:
+        state_path = resolve_state_path(args)
+        save_settings(state_path, settings, source_spec)
+        log(ui(
+            f"Saved choices to: {state_path}",
+            f"已固化选择到：{state_path}",
+        ))
 
     log(ui(f"Wrote output file: {output_path}", f"已写入输出文件：{output_path}"))
     log(ui(f"Output encoding: {loaded_text.encoding}", f"输出编码：{loaded_text.encoding}"))
@@ -1550,6 +1919,11 @@ def run_cli(args: argparse.Namespace) -> int:
     ))
     for index, dialer_proxy in enumerate(settings.dialer_proxies, start=1):
         log(f"{build_exit_name(index)} -> dialer-proxy: {dialer_proxy}")
+    if settings.normal_urls:
+        log(ui(
+            f"{NORMAL_GROUP_NAME} contains {len(settings.normal_urls)} normal proxy node(s).",
+            f"{NORMAL_GROUP_NAME} 包含 {len(settings.normal_urls)} 个普通节点。",
+        ))
     if args.verify_against:
         verify_output(config, args.verify_against)
     return 0
