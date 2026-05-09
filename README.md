@@ -140,12 +140,12 @@ export CLASH_SUB_LANG=zh
 
 After a successful one-time generation or successful server refresh, the script writes local choices to `.clash-chain-state.json` by default.
 
-The saved file may contain the upstream subscription URL and private node URLs, so it is ignored by Git. On the next run, the script asks whether to reuse the saved choices. If reused, the upstream subscription is fetched again, but manual exits, normal nodes, selected `dialer-proxy`, active exit, and listener port remain unchanged.
+The saved file may contain the upstream subscription URL and private node URLs, so it is ignored by Git. After a successful interactive run, the script asks whether to save the choices. On the next interactive run, the script asks whether to reuse them. If reused, the upstream subscription is fetched again, but manual exits, normal nodes, selected `dialer-proxy`, active exit, and listener port remain unchanged.
 
 Useful options:
 
-- `--use-saved`: reuse saved choices without asking.
-- `--no-save`: do not write the state file.
+- `--use-saved`: reuse saved choices without asking. Required for non-interactive reuse.
+- `--no-save`: do not write the state file or ask whether to save.
 - `--state-file PATH`: use a different state file path.
 
 ## Health Check
@@ -214,14 +214,14 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 
 普通节点是额外加入到 `proxies` 的非链式节点。脚本会把它们命名为 `普通节点`、`普通节点2` 等，并创建 `手动普通节点` 策略组。普通节点不会带 `dialer-proxy`，不会影响 `Claude-专用链路` 的链式出口；如果不需要，交互时选择跳过即可。
 
-脚本成功生成 YAML 或服务端成功刷新一次后，会默认把这次选择写入 `.clash-chain-state.json`。这个文件可能包含上游订阅地址和手动节点 URL，所以已被 `.gitignore` 忽略，不应提交到仓库。
+脚本成功生成 YAML 或服务端成功刷新一次后，会询问是否把这次选择写入 `.clash-chain-state.json`。这个文件可能包含上游订阅地址和手动节点 URL，所以已被 `.gitignore` 忽略，不应提交到仓库。
 
-下次运行时，如果检测到已固化选择，脚本会询问是否复用。复用后只重新获取上游订阅，手动出口、普通节点、`dialer-proxy` 选择、当前出口和监听端口都保持不变，从而减少重复输入。
+下次交互运行时，如果检测到已固化选择，脚本会询问是否复用。复用后只重新获取上游订阅，手动出口、普通节点、`dialer-proxy` 选择、当前出口和监听端口都保持不变，从而减少重复输入。
 
 常用参数：
 
-- `--use-saved`：直接使用已固化选择，不再询问。
-- `--no-save`：本次运行不写入固化文件。
+- `--use-saved`：直接使用已固化选择，不再询问；非交互复用时必须显式提供。
+- `--no-save`：本次运行不写入固化文件，也不询问是否保存。
 - `--state-file PATH`：指定其他固化文件路径。
 
 ## 中文操作步骤

@@ -1001,12 +1001,33 @@ def describe_saved_settings(settings: TransformSettings) -> None:
 
 def should_use_saved_settings(args: argparse.Namespace, settings: TransformSettings) -> bool:
     describe_saved_settings(settings)
-    if args.use_saved or args.no_interactive:
+    if args.use_saved:
         return True
+    if args.no_interactive:
+        log(ui(
+            "Saved choices exist, but --use-saved was not provided in non-interactive mode.",
+            "检测到已固化选择，但非交互模式未提供 --use-saved，因此不会复用。",
+        ))
+        return False
     return prompt_yes_no(
         ui(
             "Use saved choices and only refresh the upstream subscription content?",
             "是否使用已固化选择，仅刷新上游订阅内容？",
+        ),
+        default=True,
+        no_interactive=args.no_interactive,
+    )
+
+
+def should_save_settings(args: argparse.Namespace) -> bool:
+    if args.no_save:
+        return False
+    if args.no_interactive:
+        return True
+    return prompt_yes_no(
+        ui(
+            "Save these choices for future runs?",
+            "是否固化本次选择，供下次运行复用？",
         ),
         default=True,
         no_interactive=args.no_interactive,
@@ -1740,6 +1761,7 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
     )
     output_path = Path(args.output).expanduser().resolve() if args.output else None
     cache: dict[str, CachedResponse] = {}
+    save_confirmed: bool | None = None
 
     class SubscriptionHandler(BaseHTTPRequestHandler):
         server_version = "ClashChainLocalServer/1.0"
@@ -1796,7 +1818,10 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                 if output_path:
                     output_path.parent.mkdir(parents=True, exist_ok=True)
                     output_path.write_bytes(body)
-                if not args.no_save:
+                nonlocal save_confirmed
+                if save_confirmed is None:
+                    save_confirmed = should_save_settings(args)
+                if save_confirmed:
                     state_path = resolve_state_path(args)
                     save_settings(state_path, settings, source_spec)
                     log(ui(
@@ -1902,7 +1927,7 @@ def run_cli(args: argparse.Namespace) -> int:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding=loaded_text.encoding)
-    if not args.no_save:
+    if should_save_settings(args):
         state_path = resolve_state_path(args)
         save_settings(state_path, settings, source_spec)
         log(ui(
