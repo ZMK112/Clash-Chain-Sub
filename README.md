@@ -7,7 +7,7 @@ It is useful when you want Clash Verge to keep using a normal subscription URL, 
 ## What It Does
 
 - Fetches an upstream subscription URL or reads a local YAML file.
-- Adds one or more manual exit nodes parsed from `vmess://`, `ss://`, or `socks://` URLs.
+- Adds one or more manual exit nodes parsed from `vless://`, `vmess://`, `ss://`, or `socks://` URLs.
 - Optionally adds normal proxy nodes that do not use chain routing.
 - Adds the managed route group `Claude-专用链路`.
 - Adds the local SOCKS listener `cac-docker-socks`.
@@ -116,7 +116,7 @@ python3 subscription_proxy.py \
   --lang en \
   --public-host 192.168.1.23 \
   --subscription-url 'https://example.com/your/upstream/subscription' \
-  --chain-node-url 'ss://...' \
+  --chain-node-url 'vless://...' \
   --normal-node-url 'socks://...' \
   --chain-node-dialer 'Japan 01' \
   --active-exit 1 \
@@ -197,7 +197,7 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 ## 项目作用
 
 - 从上游订阅地址获取 YAML，或读取本地 YAML 文件。
-- 从 `vmess://`、`ss://`、`socks://` URL 解析手动出口节点。
+- 从 `vless://`、`vmess://`、`ss://`、`socks://` URL 解析手动出口节点。
 - 可选增加普通节点；普通节点不参与链式转发。
 - 自动加入 `Claude-专用链路` 策略组。
 - 自动加入 `cac-docker-socks` 本地 SOCKS 监听器。
@@ -222,7 +222,7 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
   -> 目标网站
 ```
 
-其中 `静态住宅-落地出口` 是脚本从你输入的 `vmess://`、`ss://` 或 `socks://` URL 解析出来的手动出口节点；`dialer-proxy` 是订阅文件中已经存在的节点名称。Clash 会让手动出口节点通过 `dialer-proxy` 指定的上游节点建立连接，而不是直接从本机网络连接目标出口。
+其中 `静态住宅-落地出口` 是脚本从你输入的 `vless://`、`vmess://`、`ss://` 或 `socks://` URL 解析出来的手动出口节点；`dialer-proxy` 是订阅文件中已经存在的节点名称。Clash 会让手动出口节点通过 `dialer-proxy` 指定的上游节点建立连接，而不是直接从本机网络连接目标出口。
 
 这样做的主要原因：
 

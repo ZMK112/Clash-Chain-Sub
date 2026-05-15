@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 from urllib.request import Request, urlopen
 
 import yaml
@@ -208,8 +208,8 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help=ui(
-            "Manual exit URL such as vmess://..., ss://..., or socks://.... Repeat for multiple exits.",
-            "手动出口节点 URL，例如 vmess://...、ss://... 或 socks://...。多个出口可重复传入。",
+            "Manual exit URL such as vless://..., vmess://..., ss://..., or socks://.... Repeat for multiple exits.",
+            "手动出口节点 URL，例如 vless://...、vmess://...、ss://... 或 socks://...。多个出口可重复传入。",
         ),
     )
     parser.add_argument(
@@ -217,8 +217,8 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help=ui(
-            "Optional normal proxy URL such as vmess://..., ss://..., or socks://.... Repeat for multiple normal nodes.",
-            "可选普通节点 URL，例如 vmess://...、ss://... 或 socks://...。多个普通节点可重复传入。",
+            "Optional normal proxy URL such as vless://..., vmess://..., ss://..., or socks://.... Repeat for multiple normal nodes.",
+            "可选普通节点 URL，例如 vless://...、vmess://...、ss://... 或 socks://...。多个普通节点可重复传入。",
         ),
     )
     parser.add_argument(
@@ -730,8 +730,86 @@ def parse_vmess_url_normal(uri: str, name: str) -> dict[str, Any]:
     return proxy
 
 
+def parse_vless_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
+    parsed = urlsplit(uri)
+    if parsed.scheme.lower() != "vless":
+        raise ValueError(ui(
+            "Not a valid vless:// URL",
+            "不是有效的 vless:// URL",
+        ))
+    uuid = unquote(parsed.username or "")
+    if not uuid or not parsed.hostname or parsed.port is None:
+        raise ValueError(ui(
+            "A vless:// URL must include uuid, host, and port.",
+            "vless:// URL 必须包含 uuid、主机和端口。",
+        ))
+
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    node: dict[str, Any] = {
+        "name": DoubleQuotedString(name),
+        "type": "vless",
+        "server": parsed.hostname,
+        "port": parsed.port,
+        "uuid": uuid,
+        "network": query.get("type", "tcp") or "tcp",
+        "udp": True,
+        "dialer-proxy": SingleQuotedString(dialer_proxy),
+    }
+
+    flow = query.get("flow")
+    if flow:
+        node["flow"] = flow
+
+    encryption = query.get("encryption")
+    if encryption:
+        node["encryption"] = encryption
+
+    security = (query.get("security") or "").lower()
+    if security == "tls":
+        node["tls"] = True
+    elif security == "reality":
+        node["tls"] = True
+        node["reality-opts"] = {
+            key: value
+            for key, value in {
+                "public-key": query.get("pbk") or query.get("publicKey"),
+                "short-id": query.get("sid") or query.get("shortId"),
+            }.items()
+            if value
+        }
+
+    server_name = query.get("sni") or query.get("servername") or query.get("serverName") or query.get("host")
+    if server_name:
+        node["servername"] = server_name
+
+    if node["network"] == "ws":
+        ws_opts: dict[str, Any] = {}
+        path = query.get("path")
+        host = query.get("host")
+        if path:
+            ws_opts["path"] = path
+        if host:
+            ws_opts["headers"] = {"Host": host}
+        if ws_opts:
+            node["ws-opts"] = ws_opts
+    elif node["network"] == "grpc":
+        service_name = query.get("serviceName") or query.get("service-name")
+        if service_name:
+            node["grpc-opts"] = {"grpc-service-name": service_name}
+
+    return node
+
+
+def parse_vless_url_normal(uri: str, name: str) -> dict[str, Any]:
+    proxy = parse_vless_url(uri, name=name, dialer_proxy="")
+    proxy.pop("dialer-proxy", None)
+    return proxy
+
+
 def parse_manual_proxy_url(uri: str, name: str, dialer_proxy: str) -> dict[str, Any]:
     lowered = uri.lower()
+    if lowered.startswith("vless://"):
+        return parse_vless_url(uri, name, dialer_proxy)
     if lowered.startswith("vmess://"):
         return parse_vmess_url(uri, name, dialer_proxy)
     if lowered.startswith("ss://"):
@@ -739,13 +817,15 @@ def parse_manual_proxy_url(uri: str, name: str, dialer_proxy: str) -> dict[str, 
     if lowered.startswith("socks://"):
         return parse_socks_url(uri, name, dialer_proxy)
     raise ValueError(ui(
-        "Only vmess://, ss://, and socks:// manual exit URLs are supported.",
-        "仅支持 vmess://、ss:// 和 socks:// 手动出口节点 URL。",
+        "Only vless://, vmess://, ss://, and socks:// manual exit URLs are supported.",
+        "仅支持 vless://、vmess://、ss:// 和 socks:// 手动出口节点 URL。",
     ))
 
 
 def parse_normal_proxy_url(uri: str, name: str) -> dict[str, Any]:
     lowered = uri.lower()
+    if lowered.startswith("vless://"):
+        return parse_vless_url_normal(uri, name)
     if lowered.startswith("vmess://"):
         return parse_vmess_url_normal(uri, name)
     if lowered.startswith("ss://"):
@@ -753,8 +833,8 @@ def parse_normal_proxy_url(uri: str, name: str) -> dict[str, Any]:
     if lowered.startswith("socks://"):
         return parse_socks_url_normal(uri, name)
     raise ValueError(ui(
-        "Only vmess://, ss://, and socks:// normal proxy URLs are supported.",
-        "仅支持 vmess://、ss:// 和 socks:// 普通节点 URL。",
+        "Only vless://, vmess://, ss://, and socks:// normal proxy URLs are supported.",
+        "仅支持 vless://、vmess://、ss:// 和 socks:// 普通节点 URL。",
     ))
 
 
