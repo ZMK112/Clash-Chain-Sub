@@ -11,6 +11,7 @@ import copy
 import ipaddress
 import json
 import os
+import re
 import socket
 import sys
 from dataclasses import dataclass
@@ -36,6 +37,12 @@ MANAGED_GROUP_NAME = "Claude-专用链路"
 MANAGED_LISTENER_NAME = "cac-docker-socks"
 NORMAL_NODE_BASE_NAME = "普通节点"
 NORMAL_GROUP_NAME = "手动普通节点"
+REGION_GROUPS = (
+    ("HK_PROXY", ("hk", "hong kong", "香港", "🇭🇰")),
+    ("JP_PROXY", ("jp", "japan", "日本", "东京", "東京", "大阪", "🇯🇵")),
+    ("TW_PROXY", ("tw", "taiwan", "台湾", "台灣", "🇹🇼")),
+)
+REGION_GROUP_NAMES = tuple(name for name, _keywords in REGION_GROUPS)
 METADATA_PROXY_KEYWORDS = (
     "plan expires",
     "plan resets",
@@ -44,7 +51,7 @@ METADATA_PROXY_KEYWORDS = (
     "套餐重置日期",
     "订阅获取时间",
 )
-JP_KEYWORDS = ("japan", "🇯🇵")
+JP_KEYWORDS = ("jp", "japan", "日本", "东京", "東京", "大阪", "🇯🇵")
 FETCH_HEADERS = {
     "User-Agent": "clash-verge/1.0",
     "Accept": "text/yaml, application/x-yaml, text/plain, */*",
@@ -610,6 +617,10 @@ def is_normal_node_name(name: str | None) -> bool:
         return False
     suffix = name[len(NORMAL_NODE_BASE_NAME) :]
     return suffix.isdigit()
+
+
+def is_region_group_name(name: str | None) -> bool:
+    return bool(name and name in REGION_GROUP_NAMES)
 
 
 def is_metadata_proxy_name(name: str | None) -> bool:
@@ -1367,6 +1378,35 @@ def collect_proxy_names(config: dict[str, Any]) -> list[str]:
     return names
 
 
+def keyword_matches_proxy_name(proxy_name: str, keyword: str) -> bool:
+    normalized_name = proxy_name.casefold()
+    normalized_keyword = keyword.casefold()
+    if normalized_keyword in {"hk", "jp", "tw"}:
+        return re.search(
+            rf"(?<![a-z0-9]){re.escape(normalized_keyword)}(?![a-z0-9])",
+            normalized_name,
+        ) is not None
+    return normalized_keyword in normalized_name
+
+
+def build_region_proxy_groups(proxy_names: list[str]) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    for group_name, keywords in REGION_GROUPS:
+        matched = [
+            DoubleQuotedString(proxy_name)
+            for proxy_name in proxy_names
+            if any(keyword_matches_proxy_name(proxy_name, keyword) for keyword in keywords)
+        ]
+        if not matched:
+            continue
+        groups.append({
+            "name": group_name,
+            "type": "select",
+            "proxies": matched,
+        })
+    return groups
+
+
 def strip_metadata_proxies(config: dict[str, Any]) -> list[str]:
     proxies = config.get("proxies")
     if not isinstance(proxies, list):
@@ -1536,7 +1576,10 @@ def strip_managed_blocks(config: dict[str, Any]) -> None:
             for item in proxy_groups
             if not (
                 isinstance(item, dict)
-                and item.get("name") in {MANAGED_GROUP_NAME, NORMAL_GROUP_NAME}
+                and (
+                    item.get("name") in {MANAGED_GROUP_NAME, NORMAL_GROUP_NAME}
+                    or is_region_group_name(item.get("name"))
+                )
             )
         ]
 
@@ -1605,6 +1648,11 @@ def inject_managed_blocks(
             "The 'proxies' field is not a list and cannot receive managed exits.",
             "'proxies' 字段不是列表，无法写入托管出口节点。",
         ))
+    region_groups = build_region_proxy_groups([
+        item["name"]
+        for item in proxies
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    ])
     proxies.extend(managed_proxies)
     proxies.extend(normal_proxies)
 
@@ -1634,6 +1682,8 @@ def inject_managed_blocks(
                 ],
             },
         )
+    for offset, region_group in enumerate(region_groups, start=1 + int(bool(normal_proxies))):
+        proxy_groups.insert(offset, region_group)
 
     listeners = config.setdefault("listeners", [])
     if not isinstance(listeners, list):
@@ -2108,6 +2158,23 @@ def run_cli(args: argparse.Namespace) -> int:
         log(ui(
             f"{NORMAL_GROUP_NAME} contains {len(settings.normal_urls)} normal proxy node(s).",
             f"{NORMAL_GROUP_NAME} 包含 {len(settings.normal_urls)} 个普通节点。",
+        ))
+    for group_name, _keywords in REGION_GROUPS:
+        group = next(
+            (
+                item
+                for item in config.get("proxy-groups", [])
+                if isinstance(item, dict) and item.get("name") == group_name
+            ),
+            None,
+        )
+        if not group:
+            continue
+        group_proxies = group.get("proxies")
+        count = len(group_proxies) if isinstance(group_proxies, list) else 0
+        log(ui(
+            f"{group_name} contains {count} upstream proxy node(s).",
+            f"{group_name} 包含 {count} 个上游代理节点。",
         ))
     if args.verify_against:
         verify_output(config, args.verify_against)

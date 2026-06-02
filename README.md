@@ -10,6 +10,7 @@ It is useful when you want Clash Verge to keep using a normal subscription URL, 
 - Adds one or more manual exit nodes parsed from `vless://`, `vmess://`, `ss://`, or `socks://` URLs.
 - Optionally adds normal proxy nodes that do not use chain routing.
 - Adds the managed route group `Claude-专用链路`.
+- Adds region route groups `HK_PROXY`, `JP_PROXY`, and `TW_PROXY` when matching upstream nodes exist.
 - Adds the local SOCKS listener `cac-docker-socks`.
 - Adds three Claude-related rules for `claude.ai`, `anthropic.com`, and the `claude` keyword.
 - Removes metadata-only proxy entries such as plan expiry/reset markers.
@@ -221,6 +222,7 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 - 从 `vless://`、`vmess://`、`ss://`、`socks://` URL 解析手动出口节点。
 - 可选增加普通节点；普通节点不参与链式转发。
 - 自动加入 `Claude-专用链路` 策略组。
+- 当存在匹配的上游节点时，自动加入 `HK_PROXY`、`JP_PROXY`、`TW_PROXY` 地区策略组。
 - 自动加入 `cac-docker-socks` 本地 SOCKS 监听器。
 - 自动维护 3 条 Claude 规则：`claude.ai`、`anthropic.com`、`claude` 关键字。
 - 自动删除套餐到期、套餐重置、订阅获取时间等无用元信息节点。
@@ -261,6 +263,16 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 脚本成功生成 YAML 或服务端成功刷新一次后，会询问是否把这次选择写入 `.clash-chain-state.json`。这个文件可能包含上游订阅地址和手动节点 URL，所以已被 `.gitignore` 忽略，不应提交到仓库。
 
 下次交互运行时，如果检测到已固化选择，脚本会询问是否复用。复用后只重新获取上游订阅，手动出口、普通节点、`dialer-proxy` 选择、当前出口和监听端口都保持不变，从而减少重复输入。
+
+## 地区策略组
+
+脚本会扫描上游订阅节点名称，并自动维护以下地区策略组：
+
+- `HK_PROXY`：匹配 `HK`、`Hong Kong`、`香港`、`🇭🇰`。
+- `JP_PROXY`：匹配 `JP`、`Japan`、`日本`、`东京`、`東京`、`大阪`、`🇯🇵`。
+- `TW_PROXY`：匹配 `TW`、`Taiwan`、`台湾`、`台灣`、`🇹🇼`。
+
+每次刷新都会先删除旧的地区策略组，再基于当前上游订阅重新生成。只有匹配到节点时才生成对应策略组；没有匹配节点时不会生成空组。
 
 ## 原始上游 YAML 缓存
 
