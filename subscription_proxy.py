@@ -431,6 +431,24 @@ def prompt_text(prompt: str, default: str | None = None, allow_empty: bool = Fal
         ), flush=True)
 
 
+def prompt_subscription_url(default: str | None, cache_available: bool, cache_path: Path) -> str:
+    if default:
+        return prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"), default=default)
+
+    value = prompt_text(ui(
+        "Enter upstream subscription URL, or leave empty to use cached raw YAML",
+        "请输入上游订阅地址，或留空使用已缓存的原始 YAML",
+    ), allow_empty=True)
+    if value:
+        return value
+    if cache_available:
+        return ""
+    fail(ui(
+        f"No subscription URL was provided and no cached raw upstream YAML exists at: {cache_path}. Provide a subscription URL once, or use --input-file.",
+        f"未提供订阅地址，且没有可用的原始上游 YAML 缓存：{cache_path}。请先提供一次订阅地址，或使用 --input-file。",
+    ))
+
+
 def prompt_yes_no(prompt: str, default: bool = False, *, no_interactive: bool = False) -> bool:
     if no_interactive:
         return default
@@ -1243,7 +1261,7 @@ def resolve_source_spec(args: argparse.Namespace) -> SourceSpec:
         subscription_url = args.subscription_url
     elif env_url:
         subscription_url = env_url
-    elif cache_available:
+    elif args.no_interactive and cache_available:
         log(ui(
             f"No subscription URL was provided. Using cached raw upstream YAML: {cache_path}",
             f"未提供订阅地址，使用已缓存的原始上游 YAML：{cache_path}",
@@ -1251,10 +1269,14 @@ def resolve_source_spec(args: argparse.Namespace) -> SourceSpec:
         return SourceSpec(input_file=cache_path, input_file_is_cache=True)
     elif saved_url and (args.use_saved or args.no_interactive):
         subscription_url = saved_url
-    elif saved_url:
-        subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"), default=saved_url)
     else:
-        subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"))
+        subscription_url = prompt_subscription_url(saved_url, cache_available, cache_path)
+        if not subscription_url:
+            log(ui(
+                f"No subscription URL was provided. Using cached raw upstream YAML: {cache_path}",
+                f"未提供订阅地址，使用已缓存的原始上游 YAML：{cache_path}",
+            ))
+            return SourceSpec(input_file=cache_path, input_file_is_cache=True)
     return SourceSpec(subscription_url=subscription_url)
 
 

@@ -179,7 +179,7 @@ The saved file may contain the upstream subscription URL and private node URLs, 
 
 ## Raw Upstream YAML Cache
 
-When a subscription URL fetch succeeds, the unmodified upstream YAML is cached to `.clash-chain-sub/last-upstream.yaml` by default. If a later run does not provide `--subscription-url`, `CLASH_SUBSCRIPTION_URL`, or `--input-file`, the script uses this cached raw YAML as the upstream input.
+When a subscription URL fetch succeeds, the unmodified upstream YAML is cached to `.clash-chain-sub/last-upstream.yaml` by default. If a later run does not provide `--subscription-url`, `CLASH_SUBSCRIPTION_URL`, or `--input-file`, press Enter at the subscription URL prompt to use this cached raw YAML as the upstream input. In non-interactive mode, the cache is used automatically when available.
 
 This cache is intentionally separate from `.clash-chain-state.json`: the state file stores your choices, while the YAML cache stores the last original upstream subscription content. Both files are ignored by Git because they may contain private data.
 
@@ -264,7 +264,7 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 
 ## 原始上游 YAML 缓存
 
-每次通过订阅地址成功获取 YAML 后，脚本会把“未注入任何链式配置之前”的原始上游 YAML 缓存到 `.clash-chain-sub/last-upstream.yaml`。如果下次运行时没有提供 `--subscription-url`、没有设置 `CLASH_SUBSCRIPTION_URL`，也没有提供 `--input-file`，脚本会默认使用这个缓存文件作为上游输入。
+每次通过订阅地址成功获取 YAML 后，脚本会把“未注入任何链式配置之前”的原始上游 YAML 缓存到 `.clash-chain-sub/last-upstream.yaml`。如果下次运行时没有提供 `--subscription-url`、没有设置 `CLASH_SUBSCRIPTION_URL`，也没有提供 `--input-file`，可以在订阅地址提示处直接回车，脚本会使用这个缓存文件作为上游输入。非交互模式下，如果缓存存在，会自动使用缓存。
 
 这个缓存与 `.clash-chain-state.json` 分开：状态文件保存你的选择，原始 YAML 缓存保存上次订阅内容。两者都可能包含私密信息，已被 Git 忽略，不应提交。
 
