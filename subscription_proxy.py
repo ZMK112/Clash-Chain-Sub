@@ -67,8 +67,37 @@ def build_managed_rules(group_name: str) -> list[str]:
     ]
 
 
+def build_docker_rules(group_name: str) -> list[str]:
+    return [
+        f"DOMAIN-SUFFIX,docker.com,{group_name}",
+        f"DOMAIN-SUFFIX,docker.io,{group_name}",
+        f"DOMAIN-SUFFIX,registry-1.docker.io,{group_name}",
+        f"DOMAIN-SUFFIX,auth.docker.io,{group_name}",
+        f"DOMAIN-SUFFIX,production.cloudflare.docker.com,{group_name}",
+        f"DOMAIN-SUFFIX,download.docker.com,{group_name}",
+        f"DOMAIN-SUFFIX,desktop.docker.com,{group_name}",
+    ]
+
+
+def build_google_rules(group_name: str) -> list[str]:
+    return [
+        f"DOMAIN-SUFFIX,google.com,{group_name}",
+        f"DOMAIN-SUFFIX,googleapis.com,{group_name}",
+        f"DOMAIN-SUFFIX,gstatic.com,{group_name}",
+        f"DOMAIN-SUFFIX,googleusercontent.com,{group_name}",
+        f"DOMAIN-SUFFIX,ggpht.com,{group_name}",
+        f"DOMAIN-SUFFIX,gmail.com,{group_name}",
+        f"DOMAIN-SUFFIX,android.com,{group_name}",
+        f"DOMAIN-SUFFIX,googleblog.com,{group_name}",
+        f"DOMAIN-SUFFIX,withgoogle.com,{group_name}",
+        f"DOMAIN-SUFFIX,google.dev,{group_name}",
+    ]
+
+
 MANAGED_RULES = build_managed_rules(MANAGED_GROUP_NAME)
-ALL_MANAGED_RULES = set(MANAGED_RULES)
+DOCKER_RULES = build_docker_rules("HK_PROXY")
+GOOGLE_RULES = build_google_rules("JP_PROXY")
+ALL_MANAGED_RULES = set(MANAGED_RULES + DOCKER_RULES + GOOGLE_RULES)
 
 
 class NoAliasDumper(yaml.SafeDumper):
@@ -1632,6 +1661,20 @@ def get_rule_insert_index(rules: list[Any]) -> int:
     return index
 
 
+def build_available_service_rules(region_groups: list[dict[str, Any]]) -> list[str]:
+    region_group_names = {
+        str(group.get("name"))
+        for group in region_groups
+        if isinstance(group.get("name"), str)
+    }
+    rules: list[str] = []
+    if "HK_PROXY" in region_group_names:
+        rules.extend(DOCKER_RULES)
+    if "JP_PROXY" in region_group_names:
+        rules.extend(GOOGLE_RULES)
+    return rules
+
+
 def inject_managed_blocks(
     config: dict[str, Any],
     managed_proxies: list[dict[str, Any]],
@@ -1709,7 +1752,8 @@ def inject_managed_blocks(
             "'rules' 字段不是列表，无法写入托管规则。",
         ))
     insert_at = get_rule_insert_index(rules)
-    config["rules"] = rules[:insert_at] + list(MANAGED_RULES) + rules[insert_at:]
+    managed_rules = list(MANAGED_RULES) + build_available_service_rules(region_groups)
+    config["rules"] = rules[:insert_at] + managed_rules + rules[insert_at:]
 
 
 def normalize_for_compare(config: dict[str, Any]) -> dict[str, Any]:
@@ -2176,6 +2220,20 @@ def run_cli(args: argparse.Namespace) -> int:
             f"{group_name} contains {count} upstream proxy node(s).",
             f"{group_name} 包含 {count} 个上游代理节点。",
         ))
+    rules = config.get("rules", [])
+    if isinstance(rules, list):
+        docker_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in DOCKER_RULES)
+        google_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in GOOGLE_RULES)
+        if docker_rule_count:
+            log(ui(
+                f"Docker service rules -> HK_PROXY ({docker_rule_count} rule(s)).",
+                f"Docker 服务规则 -> HK_PROXY（{docker_rule_count} 条）。",
+            ))
+        if google_rule_count:
+            log(ui(
+                f"Google service rules -> JP_PROXY ({google_rule_count} rule(s)).",
+                f"Google 服务规则 -> JP_PROXY（{google_rule_count} 条）。",
+            ))
     if args.verify_against:
         verify_output(config, args.verify_against)
     return 0

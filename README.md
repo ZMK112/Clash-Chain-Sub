@@ -13,6 +13,7 @@ It is useful when you want Clash Verge to keep using a normal subscription URL, 
 - Adds region route groups `HK_PROXY`, `JP_PROXY`, and `TW_PROXY` when matching upstream nodes exist.
 - Adds the local SOCKS listener `cac-docker-socks`.
 - Adds three Claude-related rules for `claude.ai`, `anthropic.com`, and the `claude` keyword.
+- Adds Docker service rules to `HK_PROXY` and Google core-service rules to `JP_PROXY` when those groups exist.
 - Removes metadata-only proxy entries such as plan expiry/reset markers.
 - Preserves UTF-8/UTF-8 BOM and non-ASCII YAML content, including Chinese names, emoji, and flags.
 - Saves successful choices locally so later runs can only refresh the upstream subscription.
@@ -225,6 +226,7 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 - 当存在匹配的上游节点时，自动加入 `HK_PROXY`、`JP_PROXY`、`TW_PROXY` 地区策略组。
 - 自动加入 `cac-docker-socks` 本地 SOCKS 监听器。
 - 自动维护 3 条 Claude 规则：`claude.ai`、`anthropic.com`、`claude` 关键字。
+- 当对应地区组存在时，自动把 Docker 服务规则指向 `HK_PROXY`，把 Google 基础服务规则指向 `JP_PROXY`。
 - 自动删除套餐到期、套餐重置、订阅获取时间等无用元信息节点。
 - 完整保留 UTF-8/UTF-8 BOM、中文、图标、国旗和其他非 ASCII 内容。
 - 成功生成后可把用户选择固化到本地，下次只刷新上游订阅内容。
@@ -273,6 +275,14 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 - `TW_PROXY`：匹配 `TW`、`Taiwan`、`台湾`、`台灣`、`🇹🇼`。
 
 每次刷新都会先删除旧的地区策略组，再基于当前上游订阅重新生成。只有匹配到节点时才生成对应策略组；没有匹配节点时不会生成空组。
+
+## 服务规则
+
+当 `HK_PROXY` 存在时，脚本会自动增加 Docker 相关规则并指向 `HK_PROXY`，覆盖 Docker Hub、registry、auth、Cloudflare CDN、download 和 desktop 域名。
+
+当 `JP_PROXY` 存在时，脚本会自动增加 Google 基础服务规则并指向 `JP_PROXY`，覆盖 `google.com`、`googleapis.com`、`gstatic.com`、`googleusercontent.com`、`ggpht.com`、`gmail.com`、`android.com`、`googleblog.com`、`withgoogle.com`、`google.dev`。
+
+按当前策略，YouTube、Google 广告和 Google 统计域名不会加入 `JP_PROXY` 托管规则。
 
 ## 原始上游 YAML 缓存
 
