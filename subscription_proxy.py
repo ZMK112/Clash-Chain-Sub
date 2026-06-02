@@ -146,12 +146,36 @@ def build_tailscale_rules(group_name: str) -> list[str]:
     ]
 
 
+def build_chatgpt_rules(group_name: str) -> list[str]:
+    return [
+        f"DOMAIN-KEYWORD,chatgpt,{group_name}",
+        f"DOMAIN-KEYWORD,openai,{group_name}",
+        f"DOMAIN-SUFFIX,chatgpt.com,{group_name}",
+        f"DOMAIN-SUFFIX,openai.com,{group_name}",
+        f"DOMAIN-SUFFIX,oaistatic.com,{group_name}",
+        f"DOMAIN-SUFFIX,oaiusercontent.com,{group_name}",
+        f"DOMAIN-SUFFIX,chatgpt.livekit.cloud,{group_name}",
+        f"DOMAIN-SUFFIX,host.livekit.cloud,{group_name}",
+        f"DOMAIN-SUFFIX,turn.livekit.cloud,{group_name}",
+        f"DOMAIN-SUFFIX,auth0.com,{group_name}",
+        f"DOMAIN-SUFFIX,arkoselabs.com,{group_name}",
+        f"DOMAIN-SUFFIX,statsigapi.net,{group_name}",
+        f"DOMAIN-SUFFIX,featuregates.org,{group_name}",
+        f"DOMAIN-SUFFIX,launchdarkly.com,{group_name}",
+        f"DOMAIN-SUFFIX,intercom.io,{group_name}",
+        f"DOMAIN-SUFFIX,intercomcdn.com,{group_name}",
+        f"DOMAIN-SUFFIX,sentry.io,{group_name}",
+        f"DOMAIN-SUFFIX,stripe.com,{group_name}",
+    ]
+
+
 MANAGED_RULES = build_managed_rules(MANAGED_GROUP_NAME)
 DOCKER_RULES = build_docker_rules("HK_PROXY")
 GOOGLE_RULES = build_google_rules("JP_PROXY")
 DEV_RULES = build_developer_rules("HK_PROXY")
 TAILSCALE_RULES = build_tailscale_rules("DIRECT")
-ALL_MANAGED_RULES = set(MANAGED_RULES + DOCKER_RULES + GOOGLE_RULES + DEV_RULES + TAILSCALE_RULES)
+CHATGPT_RULES = build_chatgpt_rules("JP_PROXY")
+ALL_MANAGED_RULES = set(MANAGED_RULES + DOCKER_RULES + GOOGLE_RULES + DEV_RULES + TAILSCALE_RULES + CHATGPT_RULES)
 
 
 class NoAliasDumper(yaml.SafeDumper):
@@ -1726,6 +1750,7 @@ def build_available_service_rules(region_groups: list[dict[str, Any]]) -> list[s
         rules.extend(DOCKER_RULES)
         rules.extend(DEV_RULES)
     if "JP_PROXY" in region_group_names:
+        rules.extend(CHATGPT_RULES)
         rules.extend(GOOGLE_RULES)
     return rules
 
@@ -2279,6 +2304,7 @@ def run_cli(args: argparse.Namespace) -> int:
     if isinstance(rules, list):
         docker_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in DOCKER_RULES)
         dev_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in DEV_RULES)
+        chatgpt_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in CHATGPT_RULES)
         google_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in GOOGLE_RULES)
         tailscale_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in TAILSCALE_RULES)
         if tailscale_rule_count:
@@ -2295,6 +2321,11 @@ def run_cli(args: argparse.Namespace) -> int:
             log(ui(
                 f"Developer/common service rules -> HK_PROXY ({dev_rule_count} rule(s)).",
                 f"开发/常用服务规则 -> HK_PROXY（{dev_rule_count} 条）。",
+            ))
+        if chatgpt_rule_count:
+            log(ui(
+                f"ChatGPT/OpenAI service rules -> JP_PROXY ({chatgpt_rule_count} rule(s)).",
+                f"ChatGPT/OpenAI 服务规则 -> JP_PROXY（{chatgpt_rule_count} 条）。",
             ))
         if google_rule_count:
             log(ui(
