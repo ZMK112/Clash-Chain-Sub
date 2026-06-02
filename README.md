@@ -15,6 +15,7 @@ It is useful when you want Clash Verge to keep using a normal subscription URL, 
 - Removes metadata-only proxy entries such as plan expiry/reset markers.
 - Preserves UTF-8/UTF-8 BOM and non-ASCII YAML content, including Chinese names, emoji, and flags.
 - Saves successful choices locally so later runs can only refresh the upstream subscription.
+- Caches the last raw upstream YAML locally, so later runs can work without entering a subscription URL.
 - Can write a generated YAML file once, or run a local/LAN HTTP subscription server.
 
 No real upstream subscription URL or proxy credentials are stored in this repository.
@@ -63,7 +64,7 @@ The language switch only affects prompts, logs, and help text. It does not trans
 Run a LAN-accessible subscription server with Chinese prompts:
 
 ```bash
-python3 subscription_proxy.py --serve --lang zh --public-host 192.168.1.23
+./run.sh
 ```
 
 Then use the printed URL in Clash Verge, for example:
@@ -73,6 +74,18 @@ http://192.168.1.23:8990/subscription.yaml
 ```
 
 LAN access is enabled by default because the server binds to `0.0.0.0`. If other devices cannot connect, allow inbound Python connections in the local firewall.
+
+`run.sh` defaults to:
+
+```bash
+uv run --with PyYAML subscription_proxy.py --serve --lang zh --use-saved
+```
+
+Pass custom options after `--`:
+
+```bash
+./run.sh -- --serve --lang zh --public-host 192.168.1.23
+```
 
 ## One-Line Remote Run
 
@@ -164,11 +177,19 @@ After a successful one-time generation or successful server refresh, the script 
 
 The saved file may contain the upstream subscription URL and private node URLs, so it is ignored by Git. After a successful interactive run, the script asks whether to save the choices. On the next interactive run, the script asks whether to reuse them. If reused, the upstream subscription is fetched again, but manual exits, normal nodes, selected `dialer-proxy`, active exit, and listener port remain unchanged.
 
+## Raw Upstream YAML Cache
+
+When a subscription URL fetch succeeds, the unmodified upstream YAML is cached to `.clash-chain-sub/last-upstream.yaml` by default. If a later run does not provide `--subscription-url`, `CLASH_SUBSCRIPTION_URL`, or `--input-file`, the script uses this cached raw YAML as the upstream input.
+
+This cache is intentionally separate from `.clash-chain-state.json`: the state file stores your choices, while the YAML cache stores the last original upstream subscription content. Both files are ignored by Git because they may contain private data.
+
 Useful options:
 
 - `--use-saved`: reuse saved choices without asking. Required for non-interactive reuse.
 - `--no-save`: do not write the state file or ask whether to save.
 - `--state-file PATH`: use a different state file path.
+- `--upstream-cache-file PATH`: use a different raw upstream YAML cache path.
+- `--no-upstream-cache`: disable reading and writing the raw upstream YAML cache.
 
 ## Health Check
 
@@ -205,6 +226,7 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 - 自动删除套餐到期、套餐重置、订阅获取时间等无用元信息节点。
 - 完整保留 UTF-8/UTF-8 BOM、中文、图标、国旗和其他非 ASCII 内容。
 - 成功生成后可把用户选择固化到本地，下次只刷新上游订阅内容。
+- 自动缓存上次原始上游 YAML，下次不传订阅地址时也可以继续生成。
 - 支持一次性生成 YAML，也支持启动本地/局域网 HTTP 订阅服务。
 
 仓库中不会内置真实订阅地址或节点凭据。
@@ -240,16 +262,24 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 
 下次交互运行时，如果检测到已固化选择，脚本会询问是否复用。复用后只重新获取上游订阅，手动出口、普通节点、`dialer-proxy` 选择、当前出口和监听端口都保持不变，从而减少重复输入。
 
+## 原始上游 YAML 缓存
+
+每次通过订阅地址成功获取 YAML 后，脚本会把“未注入任何链式配置之前”的原始上游 YAML 缓存到 `.clash-chain-sub/last-upstream.yaml`。如果下次运行时没有提供 `--subscription-url`、没有设置 `CLASH_SUBSCRIPTION_URL`，也没有提供 `--input-file`，脚本会默认使用这个缓存文件作为上游输入。
+
+这个缓存与 `.clash-chain-state.json` 分开：状态文件保存你的选择，原始 YAML 缓存保存上次订阅内容。两者都可能包含私密信息，已被 Git 忽略，不应提交。
+
 常用参数：
 
 - `--use-saved`：直接使用已固化选择，不再询问；非交互复用时必须显式提供。
 - `--no-save`：本次运行不写入固化文件，也不询问是否保存。
 - `--state-file PATH`：指定其他固化文件路径。
+- `--upstream-cache-file PATH`：指定其他原始上游 YAML 缓存路径。
+- `--no-upstream-cache`：禁用原始上游 YAML 缓存的读取和写入。
 
 ## 中文操作步骤
 
-1. 安装依赖：`python3 -m pip install -r requirements.txt`。
-2. 运行服务：`python3 subscription_proxy.py --serve --lang zh --public-host 192.168.1.23`。
+1. 安装依赖：`python3 -m pip install -r requirements.txt`，或直接使用 `uv`。
+2. 运行服务：`./run.sh`。
 3. 按提示输入上游订阅地址，或提前设置 `CLASH_SUBSCRIPTION_URL`。
 4. 按提示输入一个或多个手动出口节点 URL。
 5. 从列表中选择每个出口使用的上游 `dialer-proxy` 节点，默认优先日本节点。
@@ -257,6 +287,18 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 7. 确认监听端口，默认 `17891`。
 8. 按需增加普通节点；不需要时直接跳过。
 9. 把脚本打印出来的订阅 URL 填入 Clash Verge。
+
+`./run.sh` 默认等价于：
+
+```bash
+uv run --with PyYAML subscription_proxy.py --serve --lang zh --use-saved
+```
+
+如需传入额外参数：
+
+```bash
+./run.sh -- --serve --lang zh --public-host 192.168.1.23
+```
 
 ## 中文常用命令
 

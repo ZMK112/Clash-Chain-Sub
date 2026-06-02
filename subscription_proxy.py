@@ -27,6 +27,7 @@ import yaml
 
 DEFAULT_OUTPUT_PATH = "subscription.generated.yaml"
 DEFAULT_STATE_PATH = ".clash-chain-state.json"
+DEFAULT_UPSTREAM_CACHE_PATH = ".clash-chain-sub/last-upstream.yaml"
 DEFAULT_LISTENER_PORT = 17891
 SUBSCRIPTION_URL_ENV = "CLASH_SUBSCRIPTION_URL"
 LANG_ENV = "CLASH_SUB_LANG"
@@ -101,6 +102,7 @@ class LoadedText:
 class SourceSpec:
     subscription_url: str | None = None
     input_file: Path | None = None
+    input_file_is_cache: bool = False
 
 
 @dataclass
@@ -193,6 +195,22 @@ def parse_args() -> argparse.Namespace:
         help=ui(
             "Read a local YAML file instead of fetching from a subscription URL.",
             "读取本地 YAML 文件，而不是从订阅地址获取。",
+        ),
+    )
+    parser.add_argument(
+        "--upstream-cache-file",
+        default=DEFAULT_UPSTREAM_CACHE_PATH,
+        help=ui(
+            f"Raw upstream YAML cache file used when no subscription URL is provided (default: {DEFAULT_UPSTREAM_CACHE_PATH}).",
+            f"未提供订阅地址时使用的原始上游 YAML 缓存文件（默认：{DEFAULT_UPSTREAM_CACHE_PATH}）。",
+        ),
+    )
+    parser.add_argument(
+        "--no-upstream-cache",
+        action="store_true",
+        help=ui(
+            "Do not write or read the raw upstream YAML cache.",
+            "不要写入或读取原始上游 YAML 缓存。",
         ),
     )
     parser.add_argument(
@@ -376,6 +394,11 @@ def fetch_text(url: str, timeout: float) -> LoadedText:
     req = Request(url, headers=FETCH_HEADERS)
     with urlopen(req, timeout=timeout) as response:
         return decode_text_bytes(response.read())
+
+
+def write_loaded_text_file(path: Path, loaded_text: LoadedText) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(loaded_text.text.encode(loaded_text.encoding))
 
 
 def prompt_text(prompt: str, default: str | None = None, allow_empty: bool = False) -> str:
@@ -967,6 +990,10 @@ def resolve_state_path(args: argparse.Namespace) -> Path:
     return Path(args.state_file).expanduser().resolve()
 
 
+def resolve_upstream_cache_path(args: argparse.Namespace) -> Path:
+    return Path(args.upstream_cache_file).expanduser().resolve()
+
+
 def load_saved_settings(path: Path) -> TransformSettings | None:
     data = load_state_data(path)
     if not data:
@@ -1210,13 +1237,22 @@ def resolve_source_spec(args: argparse.Namespace) -> SourceSpec:
 
     env_url = os.environ.get(SUBSCRIPTION_URL_ENV, "").strip()
     saved_url = load_saved_subscription_url(resolve_state_path(args))
-    default_url = args.subscription_url or env_url or saved_url or None
+    cache_path = resolve_upstream_cache_path(args)
+    cache_available = not args.no_upstream_cache and cache_path.exists()
     if args.subscription_url:
         subscription_url = args.subscription_url
-    elif default_url and (args.use_saved or args.no_interactive):
-        subscription_url = default_url
-    elif default_url:
-        subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"), default=default_url)
+    elif env_url:
+        subscription_url = env_url
+    elif cache_available:
+        log(ui(
+            f"No subscription URL was provided. Using cached raw upstream YAML: {cache_path}",
+            f"未提供订阅地址，使用已缓存的原始上游 YAML：{cache_path}",
+        ))
+        return SourceSpec(input_file=cache_path, input_file_is_cache=True)
+    elif saved_url and (args.use_saved or args.no_interactive):
+        subscription_url = saved_url
+    elif saved_url:
+        subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"), default=saved_url)
     else:
         subscription_url = prompt_text(ui("Enter upstream subscription URL", "请输入上游订阅地址"))
     return SourceSpec(subscription_url=subscription_url)
@@ -1225,10 +1261,16 @@ def resolve_source_spec(args: argparse.Namespace) -> SourceSpec:
 def load_source_text(source_spec: SourceSpec, timeout: float, *, announce: bool) -> LoadedText:
     if source_spec.input_file:
         if announce:
-            log(ui(
-                f"Loading local input file: {source_spec.input_file}",
-                f"正在读取本地输入文件：{source_spec.input_file}",
-            ))
+            if source_spec.input_file_is_cache:
+                log(ui(
+                    f"Loading cached raw upstream YAML: {source_spec.input_file}",
+                    f"正在读取已缓存的原始上游 YAML：{source_spec.input_file}",
+                ))
+            else:
+                log(ui(
+                    f"Loading local input file: {source_spec.input_file}",
+                    f"正在读取本地输入文件：{source_spec.input_file}",
+                ))
         return read_text_file(source_spec.input_file)
 
     if not source_spec.subscription_url:
@@ -1256,6 +1298,17 @@ def load_source_text(source_spec: SourceSpec, timeout: float, *, announce: bool)
             "获取上游订阅失败：请求超时",
         ))
     return ""
+
+
+def maybe_save_upstream_cache(args: argparse.Namespace, source_spec: SourceSpec, loaded_text: LoadedText) -> None:
+    if args.no_upstream_cache or not source_spec.subscription_url:
+        return
+    cache_path = resolve_upstream_cache_path(args)
+    write_loaded_text_file(cache_path, loaded_text)
+    log(ui(
+        f"Cached raw upstream YAML to: {cache_path}",
+        f"已缓存原始上游 YAML：{cache_path}",
+    ))
 
 
 def get_subscription_text(args: argparse.Namespace) -> LoadedText:
@@ -1794,6 +1847,7 @@ def render_transformed_subscription(
 def prepare_runtime(args: argparse.Namespace) -> tuple[SourceSpec, TransformSettings, LoadedText]:
     source_spec = resolve_source_spec(args)
     loaded_text = load_source_text(source_spec, args.timeout, announce=True)
+    maybe_save_upstream_cache(args, source_spec, loaded_text)
     preview_config = load_yaml(loaded_text.text)
     removed_metadata_names = strip_metadata_proxies(preview_config)
     if removed_metadata_names:
@@ -1886,6 +1940,7 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
 
             try:
                 loaded_text = load_source_text(source_spec, args.timeout, announce=False)
+                maybe_save_upstream_cache(args, source_spec, loaded_text)
                 rendered, _config, removed_names = render_transformed_subscription(
                     loaded_text,
                     settings,

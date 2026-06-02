@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_RAW_BASE="${CLASH_CHAIN_SUB_RAW_BASE:-https://raw.githubusercontent.com/ZMK112/Clash-Chain-Sub/main}"
 APP_DIR="${CLASH_CHAIN_SUB_HOME:-$PWD/.clash-chain-sub}"
 SCRIPT_PATH="$APP_DIR/subscription_proxy.py"
+RUN_PATH="$APP_DIR/run.sh"
 REQ_PATH="$APP_DIR/requirements.txt"
 
 mkdir -p "$APP_DIR"
@@ -55,7 +56,9 @@ ensure_uv() {
 
 log "Downloading latest Clash Chain Subscription Proxy files."
 download "$REPO_RAW_BASE/subscription_proxy.py" "$SCRIPT_PATH"
+download "$REPO_RAW_BASE/run.sh" "$RUN_PATH"
 download "$REPO_RAW_BASE/requirements.txt" "$REQ_PATH"
+chmod +x "$RUN_PATH"
 
 ensure_uv
 
@@ -64,7 +67,7 @@ if [ "${1:-}" = "--" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-  set -- --serve --lang zh
+  set -- --serve --lang zh --use-saved
 fi
 
 log "Starting interactive proxy subscription tool with uv."
