@@ -94,10 +94,51 @@ def build_google_rules(group_name: str) -> list[str]:
     ]
 
 
+def build_developer_rules(group_name: str) -> list[str]:
+    return [
+        f"DOMAIN-SUFFIX,brew.sh,{group_name}",
+        f"DOMAIN-SUFFIX,homebrew.org,{group_name}",
+        f"DOMAIN-SUFFIX,github.com,{group_name}",
+        f"DOMAIN-SUFFIX,githubusercontent.com,{group_name}",
+        f"DOMAIN-SUFFIX,githubassets.com,{group_name}",
+        f"DOMAIN-SUFFIX,github.io,{group_name}",
+        f"DOMAIN-SUFFIX,githubapp.com,{group_name}",
+        f"DOMAIN-SUFFIX,objects.githubusercontent.com,{group_name}",
+        f"DOMAIN-SUFFIX,raw.githubusercontent.com,{group_name}",
+        f"DOMAIN-SUFFIX,pkg-containers.githubusercontent.com,{group_name}",
+        f"DOMAIN-SUFFIX,ghcr.io,{group_name}",
+        f"DOMAIN-SUFFIX,git-scm.com,{group_name}",
+        f"DOMAIN-SUFFIX,npmjs.com,{group_name}",
+        f"DOMAIN-SUFFIX,npmjs.org,{group_name}",
+        f"DOMAIN-SUFFIX,nodejs.org,{group_name}",
+        f"DOMAIN-SUFFIX,pypi.org,{group_name}",
+        f"DOMAIN-SUFFIX,pythonhosted.org,{group_name}",
+        f"DOMAIN-SUFFIX,files.pythonhosted.org,{group_name}",
+        f"DOMAIN-SUFFIX,rust-lang.org,{group_name}",
+        f"DOMAIN-SUFFIX,crates.io,{group_name}",
+        f"DOMAIN-SUFFIX,static.crates.io,{group_name}",
+        f"DOMAIN-SUFFIX,go.dev,{group_name}",
+        f"DOMAIN-SUFFIX,golang.org,{group_name}",
+        f"DOMAIN-SUFFIX,proxy.golang.org,{group_name}",
+        f"DOMAIN-SUFFIX,sum.golang.org,{group_name}",
+        f"DOMAIN-SUFFIX,visualstudio.com,{group_name}",
+        f"DOMAIN-SUFFIX,code.visualstudio.com,{group_name}",
+        f"DOMAIN-SUFFIX,marketplace.visualstudio.com,{group_name}",
+        f"DOMAIN-SUFFIX,vscode.dev,{group_name}",
+        f"DOMAIN-SUFFIX,vscode-unpkg.net,{group_name}",
+        f"DOMAIN-SUFFIX,vscode-cdn.net,{group_name}",
+        f"DOMAIN-SUFFIX,jetbrains.com,{group_name}",
+        f"DOMAIN-SUFFIX,plugins.jetbrains.com,{group_name}",
+        f"DOMAIN-SUFFIX,download.jetbrains.com,{group_name}",
+        f"DOMAIN-SUFFIX,download-cdn.jetbrains.com,{group_name}",
+    ]
+
+
 MANAGED_RULES = build_managed_rules(MANAGED_GROUP_NAME)
 DOCKER_RULES = build_docker_rules("HK_PROXY")
 GOOGLE_RULES = build_google_rules("JP_PROXY")
-ALL_MANAGED_RULES = set(MANAGED_RULES + DOCKER_RULES + GOOGLE_RULES)
+DEV_RULES = build_developer_rules("HK_PROXY")
+ALL_MANAGED_RULES = set(MANAGED_RULES + DOCKER_RULES + GOOGLE_RULES + DEV_RULES)
 
 
 class NoAliasDumper(yaml.SafeDumper):
@@ -1670,6 +1711,7 @@ def build_available_service_rules(region_groups: list[dict[str, Any]]) -> list[s
     rules: list[str] = []
     if "HK_PROXY" in region_group_names:
         rules.extend(DOCKER_RULES)
+        rules.extend(DEV_RULES)
     if "JP_PROXY" in region_group_names:
         rules.extend(GOOGLE_RULES)
     return rules
@@ -2223,11 +2265,17 @@ def run_cli(args: argparse.Namespace) -> int:
     rules = config.get("rules", [])
     if isinstance(rules, list):
         docker_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in DOCKER_RULES)
+        dev_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in DEV_RULES)
         google_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in GOOGLE_RULES)
         if docker_rule_count:
             log(ui(
                 f"Docker service rules -> HK_PROXY ({docker_rule_count} rule(s)).",
                 f"Docker 服务规则 -> HK_PROXY（{docker_rule_count} 条）。",
+            ))
+        if dev_rule_count:
+            log(ui(
+                f"Developer/common service rules -> HK_PROXY ({dev_rule_count} rule(s)).",
+                f"开发/常用服务规则 -> HK_PROXY（{dev_rule_count} 条）。",
             ))
         if google_rule_count:
             log(ui(
