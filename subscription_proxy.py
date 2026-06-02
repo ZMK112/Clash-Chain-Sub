@@ -2102,11 +2102,31 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
             log(f"HTTP {self.address_string()} {format % args}")
 
+        def write_response_body(self, body: bytes) -> bool:
+            try:
+                self.wfile.write(body)
+                return True
+            except (BrokenPipeError, ConnectionResetError):
+                self.log_client_disconnect()
+                return False
+
+        def log_client_disconnect(self) -> None:
+            log(ui(
+                f"Client disconnected before the response was fully sent: {self.address_string()} {self.path}",
+                f"客户端在响应发送完成前断开连接：{self.address_string()} {self.path}",
+            ))
+
         def do_HEAD(self) -> None:  # noqa: N802
-            self.handle_subscription_request(send_body=False)
+            try:
+                self.handle_subscription_request(send_body=False)
+            except (BrokenPipeError, ConnectionResetError):
+                self.log_client_disconnect()
 
         def do_GET(self) -> None:  # noqa: N802
-            self.handle_subscription_request(send_body=True)
+            try:
+                self.handle_subscription_request(send_body=True)
+            except (BrokenPipeError, ConnectionResetError):
+                self.log_client_disconnect()
 
         def handle_subscription_request(self, *, send_body: bool) -> None:
             request_path = urlsplit(self.path).path
@@ -2118,7 +2138,7 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 if send_body:
-                    self.wfile.write(body)
+                    self.write_response_body(body)
                 return
 
             if request_path not in {serve_path, "/"}:
@@ -2128,7 +2148,7 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 if send_body:
-                    self.wfile.write(body)
+                    self.write_response_body(body)
                 return
 
             host_header = self.headers.get("Host") or f"{default_public_host}:{args.serve_port}"
@@ -2169,7 +2189,7 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                 self.send_header("X-Clash-Chain-Source", "fresh")
                 self.end_headers()
                 if send_body:
-                    self.wfile.write(body)
+                    self.write_response_body(body)
                 return
             except UserFacingError as exc:
                 if "latest" in cache:
@@ -2181,7 +2201,7 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                     self.send_header("X-Clash-Chain-Source", "stale-cache")
                     self.end_headers()
                     if send_body:
-                        self.wfile.write(cached.body)
+                        self.write_response_body(cached.body)
                     log(ui(
                         f"Upstream fetch failed. Served cached content instead: {exc}",
                         f"上游获取失败，已改为返回缓存内容：{exc}",
@@ -2194,7 +2214,7 @@ def run_server(args: argparse.Namespace, source_spec: SourceSpec, settings: Tran
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 if send_body:
-                    self.wfile.write(body)
+                    self.write_response_body(body)
                 log(ui(
                     f"Upstream fetch failed and no cache was available: {exc}",
                     f"上游获取失败，且没有可用缓存：{exc}",
