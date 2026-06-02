@@ -284,6 +284,8 @@ python3 subscription_proxy.py --serve --serve-host 127.0.0.1
 
 当 `JP_PROXY` 存在时，脚本会自动增加 Google 基础服务规则并指向 `JP_PROXY`，覆盖 `google.com`、`googleapis.com`、`gstatic.com`、`googleusercontent.com`、`ggpht.com`、`gmail.com`、`android.com`、`googleblog.com`、`withgoogle.com`、`google.dev`。
 
+脚本会自动增加 Tailscale 相关规则并指向 `DIRECT`，覆盖 `tailscale.com`、`tailscale.io`、`ts.net`、`login.tailscale.com`、`controlplane.tailscale.com`、`derp.tailscale.com`、`log.tailscale.io`。
+
 按当前策略，YouTube、Google 广告和 Google 统计域名不会加入 `JP_PROXY` 托管规则。
 
 按当前策略，`cloudflare.com`、`amazonaws.com`、`azureedge.net`、`fastly.net` 这类大范围平台/CDN 域名不会被整体加入开发/常用服务托管规则，避免误伤非开发流量。

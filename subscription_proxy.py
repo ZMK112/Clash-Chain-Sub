@@ -134,11 +134,24 @@ def build_developer_rules(group_name: str) -> list[str]:
     ]
 
 
+def build_tailscale_rules(group_name: str) -> list[str]:
+    return [
+        f"DOMAIN-SUFFIX,tailscale.com,{group_name}",
+        f"DOMAIN-SUFFIX,tailscale.io,{group_name}",
+        f"DOMAIN-SUFFIX,ts.net,{group_name}",
+        f"DOMAIN-SUFFIX,login.tailscale.com,{group_name}",
+        f"DOMAIN-SUFFIX,controlplane.tailscale.com,{group_name}",
+        f"DOMAIN-SUFFIX,derp.tailscale.com,{group_name}",
+        f"DOMAIN-SUFFIX,log.tailscale.io,{group_name}",
+    ]
+
+
 MANAGED_RULES = build_managed_rules(MANAGED_GROUP_NAME)
 DOCKER_RULES = build_docker_rules("HK_PROXY")
 GOOGLE_RULES = build_google_rules("JP_PROXY")
 DEV_RULES = build_developer_rules("HK_PROXY")
-ALL_MANAGED_RULES = set(MANAGED_RULES + DOCKER_RULES + GOOGLE_RULES + DEV_RULES)
+TAILSCALE_RULES = build_tailscale_rules("DIRECT")
+ALL_MANAGED_RULES = set(MANAGED_RULES + DOCKER_RULES + GOOGLE_RULES + DEV_RULES + TAILSCALE_RULES)
 
 
 class NoAliasDumper(yaml.SafeDumper):
@@ -1708,7 +1721,7 @@ def build_available_service_rules(region_groups: list[dict[str, Any]]) -> list[s
         for group in region_groups
         if isinstance(group.get("name"), str)
     }
-    rules: list[str] = []
+    rules: list[str] = list(TAILSCALE_RULES)
     if "HK_PROXY" in region_group_names:
         rules.extend(DOCKER_RULES)
         rules.extend(DEV_RULES)
@@ -2267,6 +2280,12 @@ def run_cli(args: argparse.Namespace) -> int:
         docker_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in DOCKER_RULES)
         dev_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in DEV_RULES)
         google_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in GOOGLE_RULES)
+        tailscale_rule_count = sum(1 for rule in rules if isinstance(rule, str) and rule in TAILSCALE_RULES)
+        if tailscale_rule_count:
+            log(ui(
+                f"Tailscale service rules -> DIRECT ({tailscale_rule_count} rule(s)).",
+                f"Tailscale 服务规则 -> DIRECT（{tailscale_rule_count} 条）。",
+            ))
         if docker_rule_count:
             log(ui(
                 f"Docker service rules -> HK_PROXY ({docker_rule_count} rule(s)).",
